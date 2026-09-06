@@ -1,0 +1,1692 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gestão de Escalas</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <style>
+    body { background:#eef1fb; background:linear-gradient(180deg,#e8ecfb 0%,#f4f5fb 260px); min-height:100vh; }
+    [x-cloak]{ display:none; }
+    html, body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    .print-only { display:none; }
+    @media print {
+      * { -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important; }
+      .print-only { display:block !important; }
+      aside, .no-print { display:none !important; }
+      body { background:#fff; }
+      main { overflow:visible !important; }
+      .cal-scroll { overflow:visible !important; }
+      .cal-grid { min-width:0 !important; }
+      .print-block { break-inside:avoid; }
+      @page { size:A4 landscape; margin:8mm; }
+      /* Ficha do trabalhador compacta, para caber numa página */
+      .report .p-5 { padding:7px 10px !important; }
+      .report .p-4 { padding:6px 8px !important; }
+      .report .text-3xl { font-size:1.05rem !important; }
+      .report .text-2xl { font-size:1.1rem !important; }
+      .report h3 { margin-top:8px !important; margin-bottom:4px !important; }
+      .report .mt-6 { margin-top:8px !important; }
+      .report .mt-4 { margin-top:5px !important; }
+      .report .mb-4, .report .mb-2 { margin-bottom:4px !important; }
+      .report .gap-4 { gap:.4rem !important; }
+      .report .gap-3 { gap:.35rem !important; }
+      .report table th, .report table td { padding-top:2px !important; padding-bottom:2px !important; font-size:10px !important; }
+      .report .fcal { min-height:38px !important; padding:3px !important; }
+    }
+  </style>
+</head>
+<body class="text-slate-800">
+  <!-- ======================================================================
+       CONFIGURAÇÃO — liga esta app ao teu projeto Supabase.
+       O URL já está preenchido. Cola a CHAVE PÚBLICA (anon) entre as aspas.
+       Encontra-la em: Supabase → Project Settings → API → Project API keys → anon public
+  ======================================================================= -->
+  <script>
+    const SUPABASE_URL = "https://gaczparuesjodmmlered.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_npi6BgarmDsmeq-cssjxfQ_05nOpYnM";
+  </script>
+
+  <div id="app"><div class="p-10 text-center text-slate-400">A carregar…</div></div>
+
+  <script>
+  // =====================================================================
+  //  Cliente Supabase
+  // =====================================================================
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const state = { session: null, user: null };
+  const sleep = (ms)=> new Promise(r=>setTimeout(r,ms));
+  const ehRede = (e)=> /load failed|failed to fetch|networkerror|network error|timeout|fetch/i.test((e&&e.message)||String(e||''));
+  // Repete apenas em falhas de rede momentâneas (o "Load failed" do iOS).
+  async function comRetry(fn, tentativas=2){
+    for(let i=0;i<tentativas;i++){
+      try{ const r=await fn(); if(r&&r.error&&ehRede(r.error)&&i<tentativas-1){ await sleep(500); continue; } return r; }
+      catch(e){ if(ehRede(e)&&i<tentativas-1){ await sleep(500); continue; } return {error:e}; }
+    }
+  }
+  let membroEmEdicao = null;
+  let ajustarAberto = false;
+  let fichaVista = 'calendario';
+  let relVista = 'mensal';
+  let relDesde = null, relAte = null;
+
+  // =====================================================================
+  //  Utilitários
+  // =====================================================================
+  const MESES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmtHoras = (min) => (min/60).toFixed(1).replace('.', ',') + " h";
+  function fmtDate(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+  function duracaoTurnoMin(hi, hf){ const [a,b]=hi.split(':').map(Number),[c,d]=hf.split(':').map(Number); let ini=a*60+b, fim=c*60+d; if(fim<=ini) fim+=1440; return fim-ini; }
+  function atravessaMeiaNoite(hi, hf){ const [a,b]=hi.split(':').map(Number),[c,d]=hf.split(':').map(Number); return (c*60+d)<=(a*60+b); }
+  function ehNoturno(hi){ const h=Number(hi.split(':')[0]); return h>=22 || h<6; }
+
+  // =====================================================================
+  //  Catálogo de regras (dados) — igual ao motor do backend
+  // =====================================================================
+  const CATALOGO_REGRAS = [
+    { tipo:"MAX_HORAS", etiqueta:"Número máximo de horas", descricao:"Limite de horas atribuídas no período indicado.", categoriaSugerida:"OBRIGATORIA",
+      campos:[ {chave:"periodo",etiqueta:"Período",tipo:"select",omissao:"mes",opcoes:[{valor:"mes",etiqueta:"Mês"},{valor:"semana",etiqueta:"Semana"}]},
+               {chave:"limite",etiqueta:"Limite",tipo:"number",sufixo:"h",omissao:160} ] },
+    { tipo:"MIN_HORAS", etiqueta:"Número mínimo de horas", descricao:"Mínimo de horas atribuídas no período indicado.", categoriaSugerida:"PREFERENCIAL",
+      campos:[ {chave:"periodo",etiqueta:"Período",tipo:"select",omissao:"mes",opcoes:[{valor:"mes",etiqueta:"Mês"},{valor:"semana",etiqueta:"Semana"}]},
+               {chave:"limite",etiqueta:"Limite",tipo:"number",sufixo:"h",omissao:120} ] },
+    { tipo:"DESCANSO_ENTRE_TURNOS", etiqueta:"Descanso mínimo entre turnos", descricao:"Horas mínimas de descanso entre o fim de um turno e o início do seguinte.", categoriaSugerida:"OBRIGATORIA",
+      campos:[ {chave:"min_horas",etiqueta:"Horas mínimas",tipo:"number",sufixo:"h",omissao:11} ] },
+    { tipo:"MAX_DIAS_CONSECUTIVOS", etiqueta:"Máximo de dias consecutivos", descricao:"Número máximo de dias seguidos com turno atribuído.", categoriaSugerida:"OBRIGATORIA",
+      campos:[ {chave:"max_dias",etiqueta:"Dias",tipo:"number",omissao:6} ] },
+    { tipo:"MIN_FOLGAS", etiqueta:"Número mínimo de folgas", descricao:"Folgas mínimas no mês (dias sem qualquer turno).", categoriaSugerida:"OBRIGATORIA",
+      campos:[ {chave:"min_folgas",etiqueta:"Folgas por mês",tipo:"number",omissao:8} ] },
+    { tipo:"FIM_SEMANA_COMPLETO", etiqueta:"Fim de semana completo de descanso", descricao:"Pelo menos um sábado + domingo consecutivos sem turno, por mês.", categoriaSugerida:"OBRIGATORIA",
+      campos:[ {chave:"min_por_mes",etiqueta:"Fins de semana por mês",tipo:"number",omissao:1} ] },
+    { tipo:"MAX_TURNOS_NOTURNOS", etiqueta:"Máximo de turnos noturnos", descricao:"Limite de turnos noturnos no mês.", categoriaSugerida:"PREFERENCIAL",
+      campos:[ {chave:"max",etiqueta:"Máximo por mês",tipo:"number",omissao:8} ] },
+    { tipo:"NECESSIDADES_MINIMAS", etiqueta:"Necessidades mínimas por turno", descricao:"Número mínimo de trabalhadores em cada ocorrência do turno.", categoriaSugerida:"OBRIGATORIA",
+      campos:[ {chave:"min_trabalhadores",etiqueta:"Trabalhadores por turno",tipo:"number",omissao:1} ] },
+  ];
+  const tipoRegra = (t) => CATALOGO_REGRAS.find(r => r.tipo === t);
+
+  // =====================================================================
+  //  Motor de regras (validação)
+  // =====================================================================
+  function porMembro(ctx){ const m=new Map(); for(const a of ctx.atribuicoes){ if(!m.has(a.membroId)) m.set(a.membroId,[]); m.get(a.membroId).push(a);} for(const arr of m.values()) arr.sort((x,y)=>x.data.localeCompare(y.data)); return m; }
+  const sev = (r) => r.categoria === "OBRIGATORIA" ? "ERRO" : "AVISO";
+  function fmtD(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+
+  const avaliadores = {
+    MAX_HORAS(regra, ctx){ const lim=Number(regra.parametros?.limite??0), out=[]; for(const [,arr] of porMembro(ctx)){ const h=arr.reduce((s,a)=>s+a.duracaoMin,0)/60; if(lim && h>lim) out.push({regra:regra.nome,severidade:sev(regra),membroNome:arr[0].membroNome,mensagem:`${h.toFixed(1)}h atribuídas excedem o máximo de ${lim}h.`}); } return out; },
+    MIN_HORAS(regra, ctx){ const lim=Number(regra.parametros?.limite??0), out=[]; for(const [,arr] of porMembro(ctx)){ const h=arr.reduce((s,a)=>s+a.duracaoMin,0)/60; if(lim && h<lim) out.push({regra:regra.nome,severidade:sev(regra),membroNome:arr[0].membroNome,mensagem:`${h.toFixed(1)}h atribuídas abaixo do mínimo de ${lim}h.`}); } return out; },
+    DESCANSO_ENTRE_TURNOS(regra, ctx){ const minH=Number(regra.parametros?.min_horas??0), out=[]; for(const [,arr0] of porMembro(ctx)){ const arr=[...arr0].sort((a,b)=> a.data.localeCompare(b.data) || a.horaInicio.localeCompare(b.horaInicio)); for(let i=1;i<arr.length;i++){ const p=arr[i-1],c=arr[i]; const fimP=new Date(`${p.data}T${p.horaInicio}:00`).getTime()+p.duracaoMin*60000; const iniC=new Date(`${c.data}T${c.horaInicio}:00`).getTime(); if(iniC<fimP){ if(ctx.linked&&ctx.linked.has(p.turnoId+'|'+c.turnoId)) continue; out.push({regra:regra.nome,severidade:sev(regra),membroNome:c.membroNome,mensagem:`Sobreposição de turnos em ${c.data} (não pode estar em dois sítios ao mesmo tempo).`}); continue; } if(p.data!==c.data){ const desc=(iniC-fimP)/3600000; if(desc<minH) out.push({regra:regra.nome,severidade:sev(regra),membroNome:c.membroNome,mensagem:`Apenas ${desc.toFixed(1)}h de descanso entre ${p.data} e ${c.data} (mín. ${minH}h).`}); } } } return out; },
+    MAX_DIAS_CONSECUTIVOS(regra, ctx){ const max=Number(regra.parametros?.max_dias??0), out=[]; for(const [,arr] of porMembro(ctx)){ const dias=[...new Set(arr.map(a=>a.data))].sort(); let seq=dias.length?1:0,mx=seq; for(let i=1;i<dias.length;i++){ const d1=new Date(dias[i-1]).getTime(),d2=new Date(dias[i]).getTime(); seq=(d2-d1===86400000)?seq+1:1; mx=Math.max(mx,seq);} if(max && mx>max) out.push({regra:regra.nome,severidade:sev(regra),membroNome:arr[0].membroNome,mensagem:`${mx} dias consecutivos excedem o máximo de ${max}.`}); } return out; },
+    FIM_SEMANA_COMPLETO(regra, ctx){ const min=Number(regra.parametros?.min_por_mes??1), out=[]; for(const [,arr] of porMembro(ctx)){ const trab=new Set(arr.map(a=>a.data)); let livres=0; for(let dia=1;dia<=31;dia++){ const d=new Date(ctx.ano,ctx.mes-1,dia); if(d.getMonth()!==ctx.mes-1) break; if(d.getDay()===6){ const sab=fmtD(d); const dom=fmtD(new Date(ctx.ano,ctx.mes-1,dia+1)); if(!trab.has(sab)&&!trab.has(dom)) livres++; } } if(livres<min) out.push({regra:regra.nome,severidade:sev(regra),membroNome:arr[0].membroNome,mensagem:`${livres} fim(ns) de semana completo(s) livre(s); exigido(s) ${min}.`}); } return out; },
+    MAX_TURNOS_NOTURNOS(regra, ctx){ const max=Number(regra.parametros?.max??0), out=[]; for(const [,arr] of porMembro(ctx)){ const n=arr.filter(a=>a.noturno).length; if(max && n>max) out.push({regra:regra.nome,severidade:sev(regra),membroNome:arr[0].membroNome,mensagem:`${n} turnos noturnos excedem o máximo de ${max}.`}); } return out; },
+    NECESSIDADES_MINIMAS(regra, ctx){ const min=Number(regra.parametros?.min_trabalhadores??1), out=[], mapa=new Map(); for(const a of ctx.atribuicoes){ const k=`${a.data}|${a.turnoId}`; mapa.set(k,(mapa.get(k)??0)+1);} for(const [k,nn] of mapa){ if(nn<min){ const [data,turnoId]=k.split('|'); const nome=ctx.atribuicoes.find(a=>a.turnoId===turnoId)?.turnoNome??turnoId; out.push({regra:regra.nome,severidade:sev(regra),mensagem:`${data}: turno "${nome}" com ${nn} trabalhador(es), mínimo ${min}.`}); } } return out; },
+  };
+  function validarEscala(regras, ctx){ const out=[]; for(const r of regras){ const fn=avaliadores[r.tipo]; if(fn) out.push(...fn(r,ctx)); } return out; }
+
+  // =====================================================================
+  //  Gerador automático de escalas
+  //  Estratégia: guloso, dia a dia, turno a turno. Para cada lugar escolhe o
+  //  trabalhador elegível (que não quebra regras obrigatórias) com menor carga
+  //  relativa. As regras são lidas do serviço — nada é específico de vigilância.
+  // =====================================================================
+  function extrairConfig(regras){
+    const cfg = { need:1, minDescanso:0, maxDias:Infinity, maxHorasMin:Infinity, maxNoites:Infinity, maxNoitesHard:false, minFolgas:0 };
+    for(const r of regras){
+      if(!r.ativa) continue;
+      const p = r.parametros || {};
+      if(r.tipo==='NECESSIDADES_MINIMAS') cfg.need = Number(p.min_trabalhadores)||1;
+      else if(r.tipo==='DESCANSO_ENTRE_TURNOS') cfg.minDescanso = Number(p.min_horas)||0;
+      else if(r.tipo==='MAX_DIAS_CONSECUTIVOS') cfg.maxDias = Number(p.max_dias)||Infinity;
+      else if(r.tipo==='MAX_HORAS' && (p.periodo||'mes')==='mes') cfg.maxHorasMin = (Number(p.limite)||Infinity)*60;
+      else if(r.tipo==='MAX_TURNOS_NOTURNOS'){ cfg.maxNoites = Number(p.max)||Infinity; cfg.maxNoitesHard = (r.categoria==='OBRIGATORIA'); }
+      else if(r.tipo==='MIN_FOLGAS') cfg.minFolgas = Number(p.min_folgas)||0;
+    }
+    return cfg;
+  }
+  function cmpScore(a,b){ for(let i=0;i<a.length;i++){ if(a[i]<b[i]) return -1; if(a[i]>b[i]) return 1; } return 0; }
+
+  // Planeamento puro (sem rede) — testável isoladamente.
+  // Histórico do serviço até (exclusive) à escala atual: por trabalhador,
+  // total de fins de semana livres e média de noites por mês. Serve para a
+  // justiça entre meses (quem teve menos FDS livres tem prioridade; noites
+  // equilibradas ao longo do tempo).
+  function historicoServico(atrs, turnos, escalas, escalaAtual){
+    const tById=Object.fromEntries(turnos.map(t=>[t.id,t]));
+    const prior = escalas.filter(e=> e.id!==escalaAtual.id && e.data_inicio < escalaAtual.data_inicio);
+    const hist={};
+    // contagem por tipo de turno ao longo de todas as escalas anteriores
+    for(const a of atrs){ if(!prior.some(e=>e.id===a.escala_id)) continue; hist[a.membro_id]=hist[a.membro_id]||{fdsLivres:0,noitesTot:0,meses:0,porTurno:{}}; hist[a.membro_id].porTurno[a.turno_id]=(hist[a.membro_id].porTurno[a.turno_id]||0)+1; }
+    for(const e of prior){
+      const di=new Date(e.data_inicio+'T12:00:00'); const ano=di.getFullYear(), mes=di.getMonth(); const diasNoMes=new Date(ano,mes+1,0).getDate();
+      const byM={};
+      for(const a of atrs){ if(a.escala_id!==e.id) continue; (byM[a.membro_id]=byM[a.membro_id]||{dias:new Set(),noites:0}); byM[a.membro_id].dias.add(a.data); if(tById[a.turno_id]?.noturno) byM[a.membro_id].noites++; }
+      for(const mid in byM){
+        const dias=byM[mid].dias; let fds=0;
+        for(let d=1;d<=diasNoMes;d++){ const dd=new Date(ano,mes,d); if(dd.getDay()===6){ const sab=fmtDate(new Date(ano,mes,d)); const domDate=new Date(ano,mes,d+1); const dom=domDate.getMonth()===mes?fmtDate(domDate):null; if(!dias.has(sab)&&!(dom&&dias.has(dom))) fds++; } }
+        hist[mid]=hist[mid]||{fdsLivres:0,noitesTot:0,meses:0,porTurno:{}}; hist[mid].fdsLivres+=fds; hist[mid].noitesTot+=byM[mid].noites; hist[mid].meses++;
+      }
+    }
+    for(const mid in hist){ hist[mid].noitesMedia = hist[mid].meses? hist[mid].noitesTot/hist[mid].meses : 0; }
+    return hist;
+  }
+
+  function planearEscala(turnos, membros, regras, ausencias, escala, hist){
+    hist = hist || {};
+    const cfg = extrairConfig(regras);
+    const st = new Map(membros.map(m=>[m.id, { minutos:0, noites:0, streak:0, lastWorked:null, endInstant:null, porTurno:{}, target:(Number(m.horas_dia)? diasUteisMes(new Date(escala.data_inicio+'T12:00:00').getFullYear(), new Date(escala.data_inicio+'T12:00:00').getMonth()+1)*Number(m.horas_dia)*60 : (Number(m.horas_contratadas_mes)||0)*60) }]));
+    const ausente = (mid,dstr)=> ausencias.some(a=> a.membro_id===mid && dstr>=a.data_inicio && dstr<=a.data_fim);
+    const startInstant = (dstr,hi)=> new Date(`${dstr}T${hi}:00`).getTime();
+    const dayMs = 86400000;
+    // Âncora ao meio-dia: somar 24h a partir do meio-dia nunca troca de dia de
+    // calendário, mesmo no dia da mudança da hora (25h/23h). Evita duplicar ou
+    // saltar dias em outubro/março.
+    const inicio = new Date(escala.data_inicio+'T12:00:00');
+    const fim = new Date(escala.data_fim+'T12:00:00');
+    const novas = []; let uncovered = 0; let dcount = 0;
+    // Turnos "associados": feitos por quem faz o turno-pai, no mesmo dia.
+    const ligadosPorPai = {}; for(const t of turnos){ if(t.segue_turno_id){ (ligadosPorPai[t.segue_turno_id]=ligadosPorPai[t.segue_turno_id]||[]).push(t); } }
+
+    // Reservar fins de semana completos de descanso (regra FIM_SEMANA_COMPLETO).
+    // Só é possível se houver folga suficiente (mais trabalhadores do que lugares/dia).
+    const forcedOff = new Set();
+    const turnosSabado = turnos.filter(t=>!t.segue_turno_id && (turnoAtivo(t,6)||turnoAtivo(t,0)));
+    const lugaresPorDia = cfg.need * turnosSabado.length;
+    if(lugaresPorDia < membros.length){
+      const capPorFDS = membros.length - lugaresPorDia;   // quantos podem ter FDS completo em cada fim de semana
+      const weekends = [];
+      for(let d=new Date(inicio); d<=fim; d=new Date(d.getTime()+dayMs)){
+        if(d.getDay()===6){ const dom=new Date(d.getTime()+dayMs); if(dom<=fim) weekends.push([fmtDate(d), fmtDate(dom)]); }
+      }
+      if(weekends.length>0){
+        // Justiça entre meses: quem teve MENOS fins de semana livres no passado
+        // escolhe primeiro. Empate ao acaso.
+        const ordem = [...membros].sort((a,b)=> ((hist[a.id]?.fdsLivres||0)-(hist[b.id]?.fdsLivres||0)) || (Math.random()-0.5));
+        const cont = weekends.map(()=>0); let wi=0;
+        for(const m of ordem){
+          for(let tent=0; tent<weekends.length; tent++){
+            const idx = wi % weekends.length; wi++;
+            if(cont[idx] < capPorFDS){ cont[idx]++; forcedOff.add(m.id+'|'+weekends[idx][0]); forcedOff.add(m.id+'|'+weekends[idx][1]); break; }
+          }
+        }
+      }
+    }
+
+    for(let d=new Date(inicio); d<=fim; d=new Date(d.getTime()+dayMs)){
+      const dstr = fmtDate(d);
+      const ontem = fmtDate(new Date(d.getTime()-dayMs));
+      const usados = new Set();
+      const shift = dcount % turnos.length;                 // roda a ordem para variar quem apanha a noite
+      const rot = turnos.slice(shift).concat(turnos.slice(0, shift));
+      for(const t of rot){
+        if(t.segue_turno_id) continue;               // turnos associados são preenchidos com o turno-pai
+        if(!turnoAtivo(t, d.getDay())) continue;   // turno só corre nos seus dias da semana
+        for(let slot=0; slot<cfg.need; slot++){
+          // 2 passagens: a 1ª respeita a reserva de fim de semana; se ninguém
+          // couber, a 2ª ignora essa reserva (mas nunca as regras rígidas) para
+          // não deixar o turno por cobrir.
+          let best=null, bestScore=null;
+          for(let passe=0; passe<2 && !best; passe++){
+            for(const m of membros){
+              const s = st.get(m.id);
+              if(usados.has(m.id)) continue;                                 // um turno por dia por pessoa
+              if(ausente(m.id, dstr)) continue;                             // ausências
+              if(passe===0 && forcedOff.has(m.id+'|'+dstr)) continue;       // fim de semana reservado (só na 1ª passagem)
+              if(s.minutos + t.duracao_min > cfg.maxHorasMin) continue;     // máx. horas/mês
+              if(t.noturno && cfg.maxNoitesHard && s.noites+1 > cfg.maxNoites) continue;
+              const trabalhouOntem = s.lastWorked===ontem;
+              const novaStreak = trabalhouOntem ? s.streak+1 : 1;
+              if(novaStreak > cfg.maxDias) continue;                        // máx. dias seguidos
+              if(s.endInstant!=null){
+                const gap = (startInstant(dstr, t.hora_inicio) - s.endInstant)/3600000;
+                if(gap < cfg.minDescanso) continue;                        // descanso entre turnos (e sobreposição)
+              }
+              const alvo = s.target>0 ? s.target : (cfg.maxHorasMin!==Infinity ? cfg.maxHorasMin : 9600);
+              const ratio = s.minutos/alvo;                                 // preencher primeiro quem está mais longe do alvo
+              const gapDias = s.lastWorked ? (new Date(dstr) - new Date(s.lastWorked))/dayMs : 99;
+              // equilibrar noites, contando também o histórico de meses anteriores
+              const penNoite = t.noturno ? (s.noites + (hist[m.id]?.noitesMedia||0)) : 0;
+              // equilíbrio por tipo de turno (mês atual + histórico): dar a quem fez menos deste turno
+              const penTipo = (s.porTurno[t.id]||0) + (hist[m.id]?.porTurno?.[t.id]||0);
+              const score = [penTipo, ratio, penNoite, -gapDias, Math.random()];
+              if(bestScore==null || cmpScore(score, bestScore) < 0){ bestScore=score; best=m; }
+            }
+          }
+          if(!best){ uncovered++; continue; }
+          const s = st.get(best.id);
+          novas.push({ membro_id:best.id, turno_id:t.id, data:dstr });
+          s.streak = (s.lastWorked===ontem) ? s.streak+1 : 1;
+          s.minutos += t.duracao_min;
+          if(t.noturno) s.noites++;
+          s.porTurno[t.id] = (s.porTurno[t.id]||0) + 1;
+          s.lastWorked = dstr;
+          s.endInstant = startInstant(dstr, t.hora_inicio) + t.duracao_min*60000;
+          for(const L of (ligadosPorPai[t.id]||[])){ if(turnoAtivo(L, d.getDay())){ novas.push({ membro_id:best.id, turno_id:L.id, data:dstr }); s.minutos += L.duracao_min; if(L.noturno) s.noites++; const fimL=startInstant(dstr, L.hora_inicio)+L.duracao_min*60000; if(fimL>s.endInstant) s.endInstant=fimL; } }
+          usados.add(best.id);
+        }
+      }
+      dcount++;
+    }
+    return { novas, uncovered, st, ano:inicio.getFullYear(), mes:inicio.getMonth()+1 };
+  }
+
+  // Conta erros (regras obrigatórias) de um plano, para comparar tentativas.
+  function contarErros(novas, turnos, membros, regras, escala){
+    const tmap = Object.fromEntries(turnos.map(t=>[t.id,t]));
+    const mmap = Object.fromEntries(membros.map(m=>[m.id,m]));
+    const dd = new Date(escala.data_inicio+'T00:00:00');
+    const ctx = { ano:dd.getFullYear(), mes:dd.getMonth()+1, atribuicoes: novas.map(n=>({
+      membroId:n.membro_id, membroNome:mmap[n.membro_id]?.trabalhadores?.nome||'', data:n.data,
+      turnoId:n.turno_id, turnoNome:tmap[n.turno_id]?.nome||'', duracaoMin:tmap[n.turno_id]?.duracao_min||0,
+      noturno:!!tmap[n.turno_id]?.noturno, horaInicio:tmap[n.turno_id]?.hora_inicio||'00:00', atravessaMeiaNoite:!!tmap[n.turno_id]?.atravessa_meia_noite })), linked: linkedTurnos(turnos) };
+    const rc = regras.filter(r=>r.ativa).map(r=>({tipo:r.tipo,nome:r.nome,categoria:r.categoria,parametros:r.parametros}));
+    return validarEscala(rc, ctx).filter(x=>x.severidade==='ERRO').length;
+  }
+
+  // Multi-arranque: corre o planeamento várias vezes e fica com o melhor.
+  // Mede o desequilíbrio de uma escala: dispersão de horas (h²) + noites entre
+  // trabalhadores. Menor = mais justo.
+  function metricaEquilibrio(novas, turnos, membros){
+    const tById=Object.fromEntries(turnos.map(t=>[t.id,t]));
+    const min={}, noites={};
+    for(const m of membros){ min[m.id]=0; noites[m.id]=0; }
+    for(const n of novas){ const t=tById[n.turno_id]; if(!t) continue; min[n.membro_id]=(min[n.membro_id]||0)+t.duracao_min; if(t.noturno) noites[n.membro_id]=(noites[n.membro_id]||0)+1; }
+    const arrH=membros.map(m=>min[m.id]||0), arrN=membros.map(m=>noites[m.id]||0);
+    const varOf=(arr)=>{ if(!arr.length) return 0; const mean=arr.reduce((a,b)=>a+b,0)/arr.length; return arr.reduce((s,x)=>s+(x-mean)*(x-mean),0)/arr.length; };
+    return varOf(arrH)/3600 + varOf(arrN)*40; // horas em h² + peso nas noites
+  }
+  const cmpArr=(a,b)=>{ for(let i=0;i<a.length;i++){ if(a[i]<b[i]) return -1; if(a[i]>b[i]) return 1; } return 0; };
+
+  function planearEscalaMulti(turnos, membros, regras, ausencias, escala, tentativas, hist){
+    let best=null, bestKey=[Infinity,Infinity,Infinity];
+    const N=(tentativas||12);
+    for(let i=0; i<N; i++){
+      const r = planearEscala(turnos, membros, regras, ausencias, escala, hist);
+      const erros = contarErros(r.novas, turnos, membros, regras, escala);
+      const eq = metricaEquilibrio(r.novas, turnos, membros);
+      const key=[r.uncovered, erros, eq];
+      if(cmpArr(key, bestKey) < 0){ best=r; bestKey=key; }
+    }
+    return best;
+  }
+
+  // Reparador focado: tenta dar um fim de semana completo a quem tem 0,
+  // passando os turnos de fim de semana dessa pessoa a colegas elegíveis que
+  // continuem a ter o seu próprio fim de semana livre. Nunca piora as regras.
+  function repararEscala(turnos, membros, regras, ausencias, escala, atrs, hist){
+    hist = hist || {};
+    const cfg = extrairConfig(regras);
+    const fdsReq = (()=>{ const r=regras.find(x=>x.tipo==='FIM_SEMANA_COMPLETO'&&x.ativa!==false); return r?Number(r.parametros?.min_por_mes||1):0; })();
+    if(fdsReq<=0) return atrs;
+    const tById = Object.fromEntries(turnos.map(t=>[t.id,t]));
+    const di=new Date(escala.data_inicio+'T12:00:00'); const ano=di.getFullYear(), mes=di.getMonth();
+    const diasNoMes=new Date(ano,mes+1,0).getDate();
+    const ausente=(mid,ds)=>ausencias.some(a=>a.membro_id===mid&&ds>=a.data_inicio&&ds<=a.data_fim);
+    const dstrOf=(dia)=>`${ano}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+    const startInst=(ds,hi)=>new Date(`${ds}T${hi}:00`).getTime();
+
+    let byMD={}, mDays={};
+    const rebuild=()=>{ byMD={}; mDays={}; for(const a of atrs){ byMD[a.membro_id+'|'+a.data]=a; (mDays[a.membro_id]=mDays[a.membro_id]||new Set()).add(a.data); } };
+    rebuild();
+    const worksDay=(mid,ds)=>!!byMD[mid+'|'+ds];
+    const minutosDe=(mid)=>[...(mDays[mid]||[])].reduce((s,ds)=>s+(tById[byMD[mid+'|'+ds].turno_id]?.duracao_min||0),0);
+    const noitesDe=(mid)=>[...(mDays[mid]||[])].filter(ds=>tById[byMD[mid+'|'+ds].turno_id]?.noturno).length;
+    const fdsLivres=(diasSet)=>{ let c=0; for(let dia=1;dia<=diasNoMes;dia++){ const d=new Date(ano,mes,dia); if(d.getDay()===6){ const sab=dstrOf(dia); const domD=new Date(ano,mes,dia+1); const dom=domD.getMonth()===mes?dstrOf(dia+1):null; if(!diasSet.has(sab)&&!(dom&&diasSet.has(dom))) c++; } } return c; };
+    const descansoOK=(mid,ds,turnoId)=>{ const t=tById[turnoId]; const s=startInst(ds,t.hora_inicio), e=s+t.duracao_min*60000; for(const off of [-1,1]){ const d2=new Date(ds+'T12:00:00'); d2.setDate(d2.getDate()+off); const ds2=fmtDate(d2); const a2=byMD[mid+'|'+ds2]; if(!a2) continue; const t2=tById[a2.turno_id]; const s2=startInst(ds2,t2.hora_inicio), e2=s2+t2.duracao_min*60000; const gap= off<0?(s-e2)/3600000:(s2-e)/3600000; if(gap<cfg.minDescanso) return false; } return true; };
+    const consecutivosOK=(mid,ds)=>{ const dias=new Set(mDays[mid]||[]); dias.add(ds); const arr=[...dias].sort(); let seq=1,mx=1; for(let i=1;i<arr.length;i++){ const a=new Date(arr[i-1]).getTime(),b=new Date(arr[i]).getTime(); seq=(b-a===86400000)?seq+1:1; mx=Math.max(mx,seq);} return mx<=cfg.maxDias; };
+    const podeAssumir=(mid,ds,turnoId)=>{ if(worksDay(mid,ds)||ausente(mid,ds)) return false; const t=tById[turnoId]; if(minutosDe(mid)+t.duracao_min>cfg.maxHorasMin) return false; if(t.noturno&&cfg.maxNoitesHard&&noitesDe(mid)+1>cfg.maxNoites) return false; if(!consecutivosOK(mid,ds)) return false; if(!descansoOK(mid,ds,turnoId)) return false; const futuro=new Set(mDays[mid]||[]); futuro.add(ds); return fdsLivres(futuro)>=fdsReq; };
+
+    const ordemRep = [...membros].sort((a,b)=> ((hist[a.id]?.fdsLivres||0)-(hist[b.id]?.fdsLivres||0)) || (Math.random()-0.5));
+    for(const m of ordemRep){
+      if(fdsLivres(mDays[m.id]||new Set())>=fdsReq) continue;
+      for(let dia=1; dia<=diasNoMes; dia++){
+        const d=new Date(ano,mes,dia); if(d.getDay()!==6) continue;
+        const sab=dstrOf(dia); const domD=new Date(ano,mes,dia+1); const dom=domD.getMonth()===mes?dstrOf(dia+1):null;
+        const shifts=[]; if(worksDay(m.id,sab)) shifts.push(sab); if(dom&&worksDay(m.id,dom)) shifts.push(dom);
+        if(shifts.length===0) continue;
+        const plano=[]; const usados=new Set(); let ok=true;
+        for(const ds of shifts){ const a=byMD[m.id+'|'+ds]; let repl=null; for(const x of membros){ if(x.id===m.id||usados.has(x.id+'|'+ds)) continue; if(podeAssumir(x.id,ds,a.turno_id)){ repl=x.id; break; } } if(!repl){ ok=false; break; } plano.push({ds,to:repl,from:m.id}); usados.add(repl+'|'+ds); }
+        if(ok && plano.length===shifts.length){ for(const p of plano){ byMD[p.from+'|'+p.ds].membro_id=p.to; } rebuild(); break; }
+      }
+    }
+    return atrs;
+  }
+
+  async function corrigirEscala(sid, eid, escala){
+    const [{data:turnosRaw=[]},{data:membrosRaw=[]},{data:regrasRaw=[]},{data:ausencias=[]},{data:atrRaw=[]},{data:escalasAll=[]},{data:atrAll=[]}] = await Promise.all([
+      DB.turnos(sid), DB.membros(sid), DB.regras(sid), sb.from('ausencias').select('*').eq('servico_id',sid), sb.from('atribuicoes').select('*').eq('escala_id',eid),
+      DB.escalas(sid), sb.from('atribuicoes').select('*').eq('servico_id',sid)
+    ]);
+    const turnos=turnosRaw.filter(t=>t.ativo!==false);
+    const membros=membrosRaw.filter(m=>m.ativo!==false && !m.substituto);
+    const regras=regrasRaw.filter(r=>r.ativa);
+    const hist=historicoServico(atrAll, turnos, escalasAll, escala);
+    const errosDe=(novas)=>contarErros(novas, turnos, membros, regras, escala);
+
+    let melhor = atrRaw.map(a=>({membro_id:a.membro_id, turno_id:a.turno_id, data:a.data}));
+    let melhorErros = errosDe(melhor);
+
+    const candidatos = [];
+    candidatos.push(repararEscala(turnos, membros, regras, ausencias, escala, melhor.map(a=>({...a})), hist));
+    const fresh = planearEscalaMulti(turnos, membros, regras, ausencias, escala, 50, hist);
+    if(fresh){ candidatos.push(fresh.novas.map(a=>({...a}))); candidatos.push(repararEscala(turnos, membros, regras, ausencias, escala, fresh.novas.map(a=>({...a})), hist)); }
+    for(const c of candidatos){ const e=errosDe(c); if(e<melhorErros){ melhor=c; melhorErros=e; } }
+
+    const del = await sb.from('atribuicoes').delete().eq('escala_id', eid);
+    if(del.error){ alert(del.error.message); return; }
+    const rows = melhor.map(n=>({servico_id:sid, escala_id:eid, membro_id:n.membro_id, turno_id:n.turno_id, data:n.data, estado:'PLANEADO', origem:'AUTO'}));
+    for(let i=0;i<rows.length;i+=400){ const {error}=await sb.from('atribuicoes').insert(rows.slice(i,i+400)); if(error){ alert(error.message); return; } }
+    return { erros: melhorErros };
+  }
+
+  async function recontabilizar(sid, eid, escala, linhas, membros){
+    const di=new Date(escala.data_inicio+'T12:00:00'); const ano=di.getFullYear(), mes=di.getMonth()+1;
+    const min={}; for(const l of linhas){ min[l.membroId]=(min[l.membroId]||0)+l.duracaoMin; }
+    const rows=membros.map(m=>({ servico_id:sid, membro_id:m.id, ano, mes, horas_previstas:+(((min[m.id]||0)/60).toFixed(2)), estado:'ABERTO' }));
+    if(rows.length) await sb.from('registos_horas').upsert(rows, { onConflict:'membro_id,ano,mes' });
+  }
+
+  async function gerarEscalaAuto(sid, eid, escala){
+    const [{data:turnosRaw=[]},{data:membrosRaw=[]},{data:regrasRaw=[]},{data:ausencias=[]},{data:escalasAll=[]},{data:atrAll=[]}] = await Promise.all([
+      DB.turnos(sid), DB.membros(sid), DB.regras(sid), sb.from('ausencias').select('*').eq('servico_id', sid),
+      DB.escalas(sid), sb.from('atribuicoes').select('*').eq('servico_id', sid)
+    ]);
+    const turnos = turnosRaw.filter(t=>t.ativo!==false);
+    const membros = membrosRaw.filter(m=>m.ativo!==false && !m.substituto);
+    const regras = regrasRaw.filter(r=>r.ativa);
+    if(turnos.length===0 || membros.length===0){ alert('Precisas de pelo menos um turno e um trabalhador (não substituto) neste serviço.'); return; }
+    const hist = historicoServico(atrAll, turnos, escalasAll, escala);
+
+    const { novas, uncovered, st, ano, mes } = planearEscalaMulti(turnos, membros, regras, ausencias, escala, 30, hist);
+
+    const del = await sb.from('atribuicoes').delete().eq('escala_id', eid);
+    if(del.error){ alert(del.error.message); return; }
+    const rowsA = novas.map(n=>({ servico_id:sid, escala_id:eid, membro_id:n.membro_id, turno_id:n.turno_id, data:n.data, estado:'PLANEADO', origem:'AUTO' }));
+    for(let i=0;i<rowsA.length;i+=400){
+      const { error } = await sb.from('atribuicoes').insert(rowsA.slice(i,i+400));
+      if(error){ alert(error.message); return; }
+    }
+    const rows = [...st.entries()].map(([mid,s])=>({ servico_id:sid, membro_id:mid, ano, mes, horas_previstas:+(s.minutos/60).toFixed(2), estado:'ABERTO' }));
+    if(rows.length) await sb.from('registos_horas').upsert(rows, { onConflict:'membro_id,ano,mes' });
+
+    return { total:novas.length, uncovered };
+  }
+
+  // =====================================================================
+  //  Componentes de UI (strings)
+  // =====================================================================
+  const card = (inner, cls="") => `<div class="rounded-xl border border-slate-200 bg-white shadow-sm ${cls}">${inner}</div>`;
+  const badge = (txt, tone="slate") => { const t={slate:"bg-slate-100 text-slate-700",green:"bg-emerald-100 text-emerald-700",amber:"bg-amber-100 text-amber-700",red:"bg-red-100 text-red-700",indigo:"bg-indigo-100 text-indigo-700",sky:"bg-sky-100 text-sky-700"}; return `<span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${t[tone]||t.slate}">${esc(txt)}</span>`; };
+  const stat = (label,value,tone) => { const c=tone==="green"?"text-emerald-600":tone==="amber"?"text-amber-600":tone==="red"?"text-red-600":"text-indigo-700"; return card(`<div class="p-4"><p class="text-xs font-medium uppercase tracking-wide text-slate-400">${esc(label)}</p><p class="mt-1 text-2xl font-bold ${c}">${esc(value)}</p></div>`); };
+  const inputCls = "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100";
+  const labelCls = "block text-sm font-medium text-slate-700 mb-1";
+  const btnPrimary = "inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-indigo-700";
+  const btnGhost = "inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50";
+  const empty = (t,h="") => `<div class="rounded-xl border border-dashed border-slate-300 bg-white/60 p-10 text-center"><p class="text-sm font-medium text-slate-600">${esc(t)}</p>${h?`<p class="mt-1 text-sm text-slate-400">${esc(h)}</p>`:""}</div>`;
+  const estadoTone = { RASCUNHO:"amber", VALIDADA:"sky", APROVADA:"green", EM_EXECUCAO:"green", FECHADA:"slate", CANCELADA:"slate" };
+
+  // =====================================================================
+  //  Acesso a dados
+  // =====================================================================
+  const DB = {
+    servicos: () => sb.from('servicos').select('*').order('created_at'),
+    servico: (id) => sb.from('servicos').select('*').eq('id', id).single(),
+    membros: (sid) => sb.from('membros').select('*, trabalhadores(*)').eq('servico_id', sid),
+    turnos: (sid) => sb.from('turnos').select('*').eq('servico_id', sid).order('ordem'),
+    equipamentos: (sid) => sb.from('equipamentos').select('*').eq('servico_id', sid).order('ordem'),
+    regras: (sid) => sb.from('regras').select('*').eq('servico_id', sid),
+    escalas: (sid) => sb.from('escalas').select('*').eq('servico_id', sid).order('data_inicio', {ascending:false}),
+    escala: (id) => sb.from('escalas').select('*').eq('id', id).single(),
+    atribuicoes: (eid) => sb.from('atribuicoes').select('*, turnos(*), membros(*, trabalhadores(*))').eq('escala_id', eid),
+    ausencias: (sid) => sb.from('ausencias').select('*, membros(*, trabalhadores(*))').eq('servico_id', sid).order('data_inicio', {ascending:false}),
+    registos: () => sb.from('registos_horas').select('*'),
+  };
+
+  // =====================================================================
+  //  Router
+  // =====================================================================
+  function parseHash(){
+    const h = (location.hash || "#/dashboard").replace(/^#/, "");
+    const p = h.split("/").filter(Boolean);
+    return p; // ex.: ["servico","<id>","turnos"]
+  }
+
+  async function renderApp(){
+    const appEl = document.getElementById('app');
+    if (SUPABASE_ANON_KEY.startsWith("COLAR")) { appEl.innerHTML = avisoChave(); return; }
+    if (!state.session){ appEl.innerHTML = loginView(); wireLogin(); return; }
+
+    const p = parseHash();
+    const nav = [
+      {href:"#/dashboard", label:"Dashboard", active:p[0]==="dashboard"||p.length===0},
+      {href:"#/servicos", label:"Serviços", active:p[0]==="servicos"||p[0]==="servico"},
+    ];
+    appEl.innerHTML = `
+      <div class="flex min-h-screen">
+        <aside class="no-print hidden w-60 shrink-0 flex-col text-white md:flex" style="background:linear-gradient(180deg,#4f46e5 0%,#4338ca 60%,#3730a3 100%)">
+          <div class="flex items-center gap-2 px-5 py-5">
+            <div class="flex h-9 w-9 items-center justify-center rounded-xl bg-white/20 text-base font-bold text-white ring-1 ring-white/30">E</div>
+            <span class="text-lg font-semibold text-white">Escalas</span>
+          </div>
+          <nav class="flex-1 space-y-1 px-3 py-2 text-sm">
+            ${nav.map(n=>`<a href="${n.href}" class="block rounded-lg px-3 py-2 font-medium transition ${n.active?'bg-white/20 text-white':'text-indigo-100 hover:bg-white/10 hover:text-white'}">${n.label}</a>`).join("")}
+          </nav>
+          <div class="border-t border-white/15 p-4">
+            <p class="text-sm font-medium text-white">${esc(state.user?.user_metadata?.nome || "Gestor")}</p>
+            <p class="mb-2 text-xs text-indigo-200">${esc(state.user?.email || "")}</p>
+            <button id="btn-sair" class="text-xs font-medium text-indigo-100 hover:text-white">Terminar sessão</button>
+          </div>
+        </aside>
+        <main class="flex-1 overflow-x-hidden">
+          <header class="no-print sticky top-0 z-20 flex items-center justify-between gap-2 px-4 py-3 text-white md:hidden" style="background:linear-gradient(90deg,#4f46e5,#4338ca)">
+            <a href="#/dashboard" class="flex items-center gap-2">
+              <div class="flex h-7 w-7 items-center justify-center rounded-lg bg-white/20 text-sm font-bold ring-1 ring-white/30">E</div>
+              <span class="font-semibold">Escalas</span>
+            </a>
+            <nav class="flex items-center gap-1 text-sm">
+              ${nav.map(n=>`<a href="${n.href}" class="rounded-lg px-2.5 py-1.5 font-medium ${n.active?'bg-white/20':'text-indigo-100 hover:bg-white/10'}">${n.label}</a>`).join("")}
+              <button id="btn-sair-m" class="rounded-lg px-2.5 py-1.5 font-medium text-indigo-100 hover:bg-white/10">Sair</button>
+            </nav>
+          </header>
+          <div class="mx-auto max-w-6xl px-6 py-8" id="conteudo">
+            <div class="p-10 text-center text-slate-400">A carregar…</div>
+          </div>
+        </main>
+      </div>`;
+    document.getElementById('btn-sair').addEventListener('click', async ()=>{ await sb.auth.signOut(); });
+    document.getElementById('btn-sair-m')?.addEventListener('click', async ()=>{ await sb.auth.signOut(); });
+
+    const alvo = document.getElementById('conteudo');
+    try {
+      if (p[0]==="servicos") await viewServicos(alvo);
+      else if (p[0]==="servico" && p[2]==="trabalhadores") await viewTrabalhadores(alvo, p[1]);
+      else if (p[0]==="servico" && p[2]==="turnos") await viewTurnos(alvo, p[1]);
+      else if (p[0]==="servico" && p[2]==="regras") await viewRegras(alvo, p[1]);
+      else if (p[0]==="servico" && p[2]==="escalas") await viewEscalas(alvo, p[1]);
+      else if (p[0]==="servico" && p[2]==="ausencias") await viewAusencias(alvo, p[1]);
+      else if (p[0]==="servico" && p[2]==="trabalhador") await viewTrabalhadorFicha(alvo, p[1], p[3], p[4]);
+      else if (p[0]==="servico" && p[2]==="relatorios") await viewRelatorios(alvo, p[1], p[3]);
+      else if (p[0]==="servico" && p[2]==="escala") await viewEscalaDetalhe(alvo, p[1], p[3], p[4]);
+      else if (p[0]==="servico") await viewServicoOverview(alvo, p[1]);
+      else await viewDashboard(alvo);
+    } catch(e){
+      alvo.innerHTML = card(`<div class="p-6 text-sm text-red-600">Ocorreu um erro: ${esc(e.message||e)}</div>`);
+      console.error(e);
+    }
+  }
+
+  // =====================================================================
+  //  Vistas
+  // =====================================================================
+  function avisoChave(){
+    return `<div class="flex min-h-screen items-center justify-center px-4"><div class="max-w-md ${''}">${card(`<div class="p-6">
+      <h1 class="text-lg font-semibold text-slate-900">Falta configurar a chave</h1>
+      <p class="mt-2 text-sm text-slate-600">Abre o ficheiro <code>index.html</code> e substitui <code>COLAR_AQUI_A_CHAVE_ANON_PUBLIC</code> pela tua chave pública (anon) do Supabase.</p>
+      <p class="mt-2 text-sm text-slate-500">Encontra-la em: <b>Supabase → Project Settings → API → anon public</b>.</p>
+    </div>`)}</div></div>`;
+  }
+
+  function loginView(){
+    return `<div class="flex min-h-screen items-center justify-center px-4">
+      <div class="w-full max-w-sm">
+        <div class="mb-6 text-center">
+          <div class="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-600 text-lg font-bold text-white">E</div>
+          <h1 class="text-xl font-semibold text-slate-900">Gestão de Escalas</h1>
+          <p class="mt-1 text-sm text-slate-500">Planeamento e controlo de horas por serviço</p>
+        </div>
+        ${card(`<div class="p-6">
+          <div class="mb-4"><label class="${labelCls}">Email</label><input id="in-email" type="email" value="admin@exemplo.pt" class="${inputCls}"/></div>
+          <div class="mb-4"><label class="${labelCls}">Palavra-passe</label><input id="in-pass" type="password" value="admin123" class="${inputCls}"/></div>
+          <p id="login-erro" class="mb-3 hidden text-sm text-red-600"></p>
+          <button id="btn-entrar" class="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">Entrar</button>
+          <button id="btn-registar" class="mt-2 w-full rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">Criar conta</button>
+          <p class="mt-4 text-center text-xs text-slate-400">Demo: admin@exemplo.pt / admin123</p>
+        </div>`)}
+      </div></div>`;
+  }
+  function wireLogin(){
+    const err = (m)=>{ const e=document.getElementById('login-erro'); e.textContent=m; e.classList.remove('hidden'); };
+    document.getElementById('btn-entrar').addEventListener('click', async ()=>{
+      const email=document.getElementById('in-email').value.trim(), password=document.getElementById('in-pass').value;
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) err("Credenciais inválidas ou conta por confirmar.");
+    });
+    document.getElementById('btn-registar').addEventListener('click', async ()=>{
+      const email=document.getElementById('in-email').value.trim(), password=document.getElementById('in-pass').value;
+      const { error } = await sb.auth.signUp({ email, password });
+      if (error) err(error.message); else err("Conta criada. Se o projeto exigir confirmação por email, confirma antes de entrar.");
+    });
+  }
+
+  async function viewDashboard(el){
+    const [{data:servicos=[]},{data:trab=[]}] = await Promise.all([DB.servicos(), sb.from('trabalhadores').select('id')]);
+    const escalasAll = (await sb.from('escalas').select('*')).data || [];
+    const hoje=new Date(), ano=hoje.getFullYear(), mes=hoje.getMonth()+1;
+    const escalasMes = escalasAll.filter(e=>{ const d=new Date(e.data_inicio+'T12:00:00'); return d.getFullYear()===ano && d.getMonth()+1===mes; });
+    let horasPrev=0;
+    if(escalasMes.length){
+      const { data:atr=[] } = await sb.from('atribuicoes').select('escala_id, turnos(duracao_min)').in('escala_id', escalasMes.map(e=>e.id));
+      horasPrev = atr.reduce((s,a)=>s+(a.turnos?.duracao_min||0),0)/60;
+    }
+    const rascunhos = escalasAll.filter(e=>e.estado==="RASCUNHO");
+
+    const alertas=[];
+    for(const e of rascunhos) alertas.push({txt:`Escala "${e.nome}" por validar`, href:`#/servico/${e.servico_id}/escalas`, tone:"amber"});
+
+    el.innerHTML = `
+      <div class="mb-6"><h1 class="text-2xl font-semibold tracking-tight text-slate-900">Dashboard</h1>
+        <p class="mt-1 text-sm text-slate-500">Visão geral · ${MESES[mes-1]} de ${ano}</p></div>
+      <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        ${stat("Serviços ativos", String(servicos.filter(s=>s.ativo).length))}
+        ${stat("Trabalhadores", String(trab.length))}
+        ${stat("Escalas por validar", String(rascunhos.length), rascunhos.length?"amber":null)}
+        ${stat("Horas previstas (mês)", horasPrev.toFixed(0)+" h")}
+      </div>
+      <div class="mt-6 grid gap-6 lg:grid-cols-3">
+        ${card(`<div class="p-5"><h2 class="mb-4 text-sm font-semibold text-slate-700">Alertas e próximas ações</h2>
+          ${alertas.length===0?`<p class="text-sm text-slate-400">Sem alertas. Tudo em dia.</p>`:
+            `<ul class="space-y-2">${alertas.map(a=>`<li><a href="${a.href}" class="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-3 hover:bg-slate-50"><span class="flex items-center gap-3 text-sm text-slate-700">${badge("ação",a.tone)} ${esc(a.txt)}</span><span class="text-slate-400">→</span></a></li>`).join("")}</ul>`}
+        </div>`,"lg:col-span-2")}
+        ${card(`<div class="p-5"><h2 class="mb-4 text-sm font-semibold text-slate-700">Acesso rápido</h2>
+          <div class="space-y-2 text-sm"><a href="#/servicos" class="block rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100">Gerir serviços</a>
+          ${servicos.slice(0,4).map(s=>`<a href="#/servico/${s.id}" class="block rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100">${esc(s.nome)}</a>`).join("")}</div>
+        </div>`)}
+      </div>`;
+  }
+
+  async function viewServicos(el){
+    const { data:servicos=[] } = await DB.servicos();
+    const { data:membros=[] } = await sb.from('membros').select('servico_id');
+    const contar = (id)=> membros.filter(m=>m.servico_id===id).length;
+    el.innerHTML = `
+      <div class="mb-6"><h1 class="text-2xl font-semibold tracking-tight text-slate-900">Serviços</h1>
+        <p class="mt-1 text-sm text-slate-500">Cada serviço é independente: escalas, horas, regras e histórico próprios.</p></div>
+      <div class="grid gap-6 lg:grid-cols-3">
+        <div class="space-y-3 lg:col-span-2">
+          ${servicos.length===0?empty("Ainda não há serviços","Cria o primeiro no formulário ao lado."):""}
+          ${servicos.map(s=>`<a href="#/servico/${s.id}">${card(`<div class="flex items-center justify-between p-5 transition hover:border-indigo-300 hover:shadow">
+            <div><div class="flex items-center gap-2"><h3 class="font-semibold text-slate-900">${esc(s.nome)}</h3>${s.ativo?badge("ativo","green"):badge("inativo")}</div>
+            ${s.tipo?`<p class="mt-0.5 text-xs text-slate-400">${esc(s.tipo)}</p>`:""}${s.descricao?`<p class="mt-1 text-sm text-slate-500">${esc(s.descricao)}</p>`:""}</div>
+            <div class="text-right"><p class="text-2xl font-semibold text-slate-900">${contar(s.id)}</p><p class="text-xs text-slate-400">trabalhadores</p></div>
+          </div>`)}</a>`).join("")}
+        </div>
+        ${card(`<div class="p-5"><h2 class="mb-4 text-sm font-semibold text-slate-700">Novo serviço</h2>
+          <div class="space-y-3">
+            <div><label class="${labelCls}">Nome</label><input id="s-nome" class="${inputCls}" placeholder="Ex.: Vigilância Hospital X"/></div>
+            <div><label class="${labelCls}">Tipo</label><input id="s-tipo" class="${inputCls}" placeholder="Vigilância, Limpeza…"/></div>
+            <div><label class="${labelCls}">Descrição</label><textarea id="s-desc" rows="3" class="${inputCls}"></textarea></div>
+            <button id="s-criar" class="${btnPrimary}">Criar serviço</button>
+          </div>
+        </div>`,"h-fit")}
+      </div>`;
+    document.getElementById('s-criar').addEventListener('click', async ()=>{
+      const nome=document.getElementById('s-nome').value.trim(); if(!nome) return;
+      const tipo=document.getElementById('s-tipo').value.trim()||null;
+      const descricao=document.getElementById('s-desc').value.trim()||null;
+      const { data, error } = await sb.from('servicos').insert({nome,tipo,descricao}).select().single();
+      if(error) return alert(error.message);
+      location.hash = `#/servico/${data.id}`;
+    });
+  }
+
+  function servicoTabs(sid, ativo){
+    const tabs=[["","Visão geral"],["trabalhadores","Trabalhadores"],["turnos","Turnos"],["regras","Regras"],["escalas","Escalas"],["ausencias","Ausências"],["relatorios","Relatórios"]];
+    return `<div class="no-print mb-6 flex gap-1 border-b border-slate-200">${tabs.map(([k,l])=>{
+      const on=(ativo===k); const href = k?`#/servico/${sid}/${k}`:`#/servico/${sid}`;
+      return `<a href="${href}" class="-mb-px border-b-2 px-3.5 py-2.5 text-sm font-medium ${on?'border-indigo-600 text-indigo-700':'border-transparent text-slate-500 hover:text-slate-800'}">${l}</a>`;
+    }).join("")}</div>`;
+  }
+  async function servicoHeader(sid){
+    const { data:s } = await DB.servico(sid);
+    if(!s) throw new Error("Serviço não encontrado.");
+    return { s, html:`<div class="no-print mb-5"><a href="#/servicos" class="text-sm text-slate-400 hover:text-slate-600">← Serviços</a>
+      <div class="mt-1 flex items-center gap-2"><h1 class="text-2xl font-semibold tracking-tight text-slate-900">${esc(s.nome)}</h1>${s.ativo?badge("ativo","green"):badge("inativo")}</div>
+      ${s.tipo?`<p class="mt-0.5 text-sm text-slate-500">${esc(s.tipo)}</p>`:""}</div>` };
+  }
+
+  async function viewServicoOverview(el, sid){
+    const { html } = await servicoHeader(sid);
+    const [{data:membros=[]},{data:turnos=[]},{data:regras=[]},{data:escalas=[]}] = await Promise.all([DB.membros(sid),DB.turnos(sid),DB.regras(sid),DB.escalas(sid)]);
+    el.innerHTML = html + servicoTabs(sid,"") + `
+      <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        ${stat("Trabalhadores",String(membros.length))}${stat("Turnos configurados",String(turnos.length))}
+        ${stat("Regras ativas",String(regras.filter(r=>r.ativa).length))}${stat("Escalas",String(escalas.length))}
+      </div>
+      <div class="mt-6 grid gap-6 lg:grid-cols-2">
+        ${card(`<div class="p-5"><h2 class="mb-3 text-sm font-semibold text-slate-700">Escalas recentes</h2>
+          ${escalas.length===0?`<p class="text-sm text-slate-400">Nenhuma escala criada.</p>`:`<ul class="space-y-2">${escalas.slice(0,5).map(e=>`<li class="flex items-center justify-between rounded-lg border border-slate-200 px-4 py-2.5 text-sm"><a class="text-slate-700 hover:text-indigo-700" href="#/servico/${sid}/escala/${e.id}">${esc(e.nome)}</a>${badge(e.estado.toLowerCase(), estadoTone[e.estado]||"slate")}</li>`).join("")}</ul>`}
+          <div class="mt-4"><a href="#/servico/${sid}/escalas" class="${btnGhost}">Ver escalas</a></div>
+        </div>`)}
+        ${card(`<div class="p-5"><h2 class="mb-3 text-sm font-semibold text-slate-700">Configuração</h2>
+          <p class="text-sm text-slate-500">Este serviço tem ${turnos.length} turno(s) e ${regras.length} regra(s) definidas.</p>
+          <div class="mt-4 flex flex-wrap gap-2"><a href="#/servico/${sid}/trabalhadores" class="${btnGhost}">Trabalhadores</a><a href="#/servico/${sid}/turnos" class="${btnGhost}">Turnos</a><a href="#/servico/${sid}/regras" class="${btnGhost}">Regras</a></div>
+        </div>`)}
+      </div>
+      ${card(`<div class="flex flex-wrap items-center justify-between gap-3 p-5">
+        <div><h2 class="text-sm font-semibold text-slate-700">Eliminar serviço</h2>
+        <p class="mt-0.5 text-sm text-slate-500">Remove o serviço e tudo o que lhe pertence: trabalhadores associados, turnos, regras, escalas e ausências.</p></div>
+        <button id="btn-del-servico" class="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3.5 py-2 text-sm font-medium text-red-600 hover:bg-red-50">Eliminar serviço</button>
+      </div>`,"mt-6 border-red-200")}`;
+    document.getElementById('btn-del-servico').addEventListener('click', async ()=>{
+      const s = await DB.servico(sid);
+      const nome = s.data?.nome || 'este serviço';
+      if(!confirm(`Eliminar "${nome}" e TODOS os seus dados (escalas, turnos, regras, ausências)?\n\nEsta ação é permanente e não pode ser anulada.`)) return;
+      const { error } = await sb.from('servicos').delete().eq('id', sid);
+      if(error) return alert(error.message);
+      location.hash = '#/servicos';
+    });
+  }
+
+  async function viewTrabalhadores(el, sid){
+    const { html } = await servicoHeader(sid);
+    const { data:membros=[] } = await DB.membros(sid);
+    el.innerHTML = html + servicoTabs(sid,"trabalhadores") + `
+      <div class="grid gap-6 lg:grid-cols-3">
+        <div class="lg:col-span-2">
+          ${membros.length===0?empty("Sem trabalhadores neste serviço","Adiciona o primeiro no formulário ao lado."):
+          card(`<table class="w-full text-sm"><thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400">
+            <tr><th class="px-4 py-3">Nome</th><th class="px-4 py-3">Função</th><th class="px-4 py-3">Horas/dia</th><th class="px-4 py-3"></th></tr></thead>
+            <tbody class="divide-y divide-slate-100">${membros.map(m=> m.id===membroEmEdicao ? `<tr class="bg-indigo-50/40">
+              <td class="px-4 py-2"><input data-e-nome="${m.id}" value="${esc(m.trabalhadores?.nome||"")}" class="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"/></td>
+              <td class="px-4 py-2"><input data-e-funcao="${m.id}" value="${esc(m.funcao||"")}" class="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"/></td>
+              <td class="px-4 py-2"><select data-e-jornada="${m.id}" class="mb-1 w-full rounded-md border border-slate-300 px-2 py-1 text-sm">${['Turnos:6.5','Jornada normal:7','Faseado:7','Outro:'].map(o=>{const [lab,h]=o.split(':'); return `<option value="${lab}" data-h="${h}" ${m.tipo_jornada===lab?'selected':''}>${lab}${h?` (${h.replace('.',',')} h)`:''}</option>`;}).join('')}</select><input data-e-dia="${m.id}" type="number" step="0.5" value="${esc(m.horas_dia??"")}" class="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"/></td>
+              <td class="px-4 py-2 text-right whitespace-nowrap"><label class="mr-2 text-xs text-slate-500"><input type="checkbox" data-e-subst="${m.id}" ${m.substituto?'checked':''}/> subst.</label><button data-guardar="${m.id}" data-trab="${m.trabalhador_id}" class="text-xs font-medium text-indigo-600 hover:text-indigo-700">guardar</button> <button data-cancelar="1" class="ml-2 text-xs font-medium text-slate-400 hover:text-slate-600">cancelar</button></td>
+            </tr>` : `<tr>
+              <td class="px-4 py-3 font-medium"><a href="#/servico/${sid}/trabalhador/${m.id}" class="text-indigo-700 hover:underline">${esc(m.trabalhadores?.nome||"")}</a>${m.substituto?` ${badge("substituto","indigo")}`:""}</td>
+              <td class="px-4 py-3 text-slate-500">${esc(m.funcao||"—")}</td>
+              <td class="px-4 py-3 text-slate-500">${m.tipo_jornada?esc(m.tipo_jornada)+' · ':''}${m.horas_dia?esc(m.horas_dia)+" h":(m.horas_contratadas_mes?esc(m.horas_contratadas_mes)+" h/mês":"—")}</td>
+              <td class="px-4 py-3 text-right whitespace-nowrap"><button data-editar="${m.id}" class="text-xs font-medium text-indigo-600 hover:text-indigo-700">editar</button> <button data-rem="${m.id}" class="ml-2 text-xs font-medium text-red-500 hover:text-red-700">remover</button></td>
+            </tr>`).join("")}</tbody></table>`,"overflow-hidden")}
+          <p class="mt-3 text-xs text-slate-400">O trabalhador é global — pode pertencer a vários serviços. Horas e função são específicas deste serviço.</p>
+        </div>
+        ${card(`<div class="p-5"><h2 class="mb-4 text-sm font-semibold text-slate-700">Adicionar trabalhador</h2>
+          <div class="space-y-3">
+            <div><label class="${labelCls}">Nome</label><input id="t-nome" class="${inputCls}"/></div>
+            <div><label class="${labelCls}">Função</label><input id="t-funcao" class="${inputCls}" placeholder="Vigilante"/></div>
+            <div><label class="${labelCls}">Tipo de jornada</label>
+              <select id="t-jornada" class="${inputCls}">
+                <option value="Turnos" data-h="6.5">Turnos (6,5 h)</option>
+                <option value="Jornada normal" data-h="7">Jornada normal (7 h)</option>
+                <option value="Faseado" data-h="7">Faseado (7 h)</option>
+                <option value="Outro" data-h="">Outro</option>
+              </select>
+            </div>
+            <div><label class="${labelCls}">Horas por dia</label><input id="t-dia" type="number" step="0.5" value="6.5" class="${inputCls}" placeholder="6.5"/></div>
+            <label class="flex items-center gap-2 text-sm text-slate-600"><input id="t-subst" type="checkbox"/> Trabalhador substituto (não entra na geração; só colocação manual)</label>
+            <button id="t-add" class="${btnPrimary}">Adicionar</button>
+          </div></div>`,"h-fit")}
+      </div>`;
+    const jorSel=document.getElementById('t-jornada');
+    if(jorSel) jorSel.addEventListener('change', ()=>{ const h=jorSel.selectedOptions[0]?.dataset.h; if(h) document.getElementById('t-dia').value=h; });
+    document.getElementById('t-add').addEventListener('click', async ()=>{
+      const nome=document.getElementById('t-nome').value.trim(); if(!nome) return;
+      const funcao=document.getElementById('t-funcao').value.trim()||null;
+      const horas_dia=Number(document.getElementById('t-dia').value)||null;
+      const tipo_jornada=document.getElementById('t-jornada').value;
+      const substituto=document.getElementById('t-subst').checked;
+      const { data:tr, error:e1 } = await sb.from('trabalhadores').insert({nome}).select().single();
+      if(e1) return alert(e1.message);
+      const { error:e2 } = await sb.from('membros').insert({servico_id:sid, trabalhador_id:tr.id, funcao, horas_dia, tipo_jornada, substituto});
+      if(e2) return alert(e2.message);
+      renderApp();
+    });
+    el.querySelectorAll('[data-rem]').forEach(b=>b.addEventListener('click', async ()=>{
+      if(!confirm("Remover este trabalhador do serviço?")) return;
+      await sb.from('membros').delete().eq('id', b.dataset.rem); renderApp();
+    }));
+    el.querySelectorAll('[data-editar]').forEach(b=>b.addEventListener('click', ()=>{ membroEmEdicao = b.dataset.editar; renderApp(); }));
+    el.querySelectorAll('[data-cancelar]').forEach(b=>b.addEventListener('click', ()=>{ membroEmEdicao = null; renderApp(); }));
+    el.querySelectorAll('[data-guardar]').forEach(b=>b.addEventListener('click', async ()=>{
+      const mid=b.dataset.guardar, tid=b.dataset.trab;
+      const nome=el.querySelector(`[data-e-nome="${mid}"]`).value.trim();
+      const funcao=el.querySelector(`[data-e-funcao="${mid}"]`).value.trim()||null;
+      const diaRaw=el.querySelector(`[data-e-dia="${mid}"]`)?.value;
+      const tipo_jornada=el.querySelector(`[data-e-jornada="${mid}"]`)?.value||null;
+      const horas_dia=(diaRaw===""||diaRaw==null)?null:Number(diaRaw);
+      const substituto=el.querySelector(`[data-e-subst="${mid}"]`)?.checked||false;
+      if(!nome) return alert("O nome não pode ficar vazio.");
+      const { error:e1 } = await sb.from('trabalhadores').update({ nome }).eq('id', tid);
+      if(e1) return alert(e1.message);
+      const { error:e2 } = await sb.from('membros').update({ funcao, horas_dia, tipo_jornada, substituto }).eq('id', mid);
+      if(e2) return alert(e2.message);
+      membroEmEdicao = null; renderApp();
+    }));
+    el.querySelectorAll('[data-e-jornada]').forEach(sel=>sel.addEventListener('change', ()=>{ const h=sel.selectedOptions[0]?.dataset.h; if(h){ const inp=el.querySelector(`[data-e-dia="${sel.dataset.eJornada}"]`); if(inp) inp.value=h; } }));
+  }
+
+  async function viewTurnos(el, sid){
+    const { html } = await servicoHeader(sid);
+    const [{data:turnos=[]},{data:equipamentos=[]}] = await Promise.all([DB.turnos(sid), DB.equipamentos(sid)]);
+    const eqById = Object.fromEntries(equipamentos.map(e=>[e.id,e]));
+    const optTurnos=(selId, excluirId)=> `<option value="">— independente —</option>`+turnos.filter(t=>t.id!==excluirId).map(t=>`<option value="${t.id}" ${selId===t.id?'selected':''}>${esc((eqById[t.equipamento_id]?.nome||'?')+' · '+t.nome+' ('+t.hora_inicio+')')}</option>`).join('');
+    const turnoNome=(id)=>{ const t=turnos.find(x=>x.id===id); return t?((eqById[t.equipamento_id]?.nome||'?')+' · '+t.nome):''; };
+    // agrupar turnos por equipamento
+    const grupos = equipamentos.map(eq=>({ eq, turnos: turnos.filter(t=>t.equipamento_id===eq.id).sort((a,b)=>a.ordem-b.ordem) }));
+    const semEq = turnos.filter(t=>!t.equipamento_id);
+
+    el.innerHTML = html + servicoTabs(sid,"turnos") + `
+      <div class="grid gap-6 lg:grid-cols-3">
+        <div class="lg:col-span-2 space-y-4">
+          ${equipamentos.length===0?empty("Sem equipamentos","Cria o primeiro equipamento ao lado; depois adiciona-lhe turnos."):""}
+          ${grupos.map(g=>card(`<div class="p-4">
+            <div class="mb-3 flex items-center justify-between">
+              <div class="flex items-center gap-2"><span class="h-4 w-4 rounded" style="background:${esc(g.eq.cor)}"></span><span class="font-semibold text-slate-800">${esc(g.eq.nome)}</span><span class="text-xs text-slate-400">${g.turnos.length} turno(s)</span></div>
+              <button data-del-eq="${g.eq.id}" class="text-xs font-medium text-red-500 hover:text-red-700">eliminar equipamento</button>
+            </div>
+            <div class="space-y-2">${g.turnos.length===0?`<p class="text-sm text-slate-400">Sem turnos. Adiciona ao lado (escolhe este equipamento).</p>`:g.turnos.map(t=>`<div class="flex items-center justify-between rounded-lg border border-slate-100 p-3">
+              <div class="flex items-center gap-3"><span class="h-8 w-1.5 rounded-full" style="background:${esc(t.cor)}"></span>
+              <div><div class="flex flex-wrap items-center gap-2"><span class="font-medium text-slate-800">${esc(t.nome)}</span>${t.noturno?badge("noturno","indigo"):""}${t.atravessa_meia_noite?badge("passa meia-noite"):""}</div>
+              <p class="text-sm text-slate-500">${esc(t.hora_inicio)} – ${esc(t.hora_fim)} · ${fmtHoras(t.duracao_min)} · <span class="text-slate-400">${descreveDias(t.dias_semana)}</span></p>
+              <div class="mt-1 flex items-center gap-1 text-xs text-slate-500">Acompanha: <select data-segue="${t.id}" class="rounded border border-slate-300 px-1 py-0.5 text-xs">${optTurnos(t.segue_turno_id, t.id)}</select></div></div></div>
+              <button data-del="${t.id}" class="text-xs font-medium text-red-500 hover:text-red-700">eliminar</button></div>`).join("")}</div>
+          </div>`)).join("")}
+          ${semEq.length?card(`<div class="p-4"><p class="text-sm text-amber-600">${semEq.length} turno(s) sem equipamento (dados antigos).</p></div>`):""}
+        </div>
+
+        <div class="space-y-4">
+          ${card(`<div class="p-5"><h2 class="mb-3 text-sm font-semibold text-slate-700">Novo equipamento</h2>
+            <div class="flex items-center gap-2">
+              <input id="eq-nome" class="${inputCls}" placeholder="Ex.: Portaria, Recinto B…"/>
+              <input id="eq-cor" type="color" value="#64748b" class="h-10 w-12 shrink-0 rounded-lg border border-slate-300"/>
+            </div>
+            <button id="eq-add" class="${btnPrimary} mt-3">Criar equipamento</button>
+          </div>`)}
+          ${equipamentos.length?card(`<div class="p-5"><h2 class="mb-4 text-sm font-semibold text-slate-700">Novo turno</h2>
+            <div class="space-y-3">
+              <div><label class="${labelCls}">Equipamento</label><select id="tn-eq" class="${inputCls}">${equipamentos.map(e=>`<option value="${e.id}">${esc(e.nome)}</option>`).join("")}</select></div>
+              <div><label class="${labelCls}">Nome</label><input id="tn-nome" class="${inputCls}" placeholder="Manhã"/></div>
+              <div class="grid grid-cols-2 gap-3">
+                <div><label class="${labelCls}">Início</label><input id="tn-ini" type="time" value="06:00" class="${inputCls}"/></div>
+                <div><label class="${labelCls}">Fim</label><input id="tn-fim" type="time" value="12:30" class="${inputCls}"/></div>
+              </div>
+              <div><label class="${labelCls}">Dias da semana</label>
+                <div class="mb-2 flex flex-wrap gap-1 text-xs no-print"><button type="button" data-preset="todos" class="rounded border border-slate-300 px-2 py-1 hover:bg-slate-50">Todos</button><button type="button" data-preset="uteis" class="rounded border border-slate-300 px-2 py-1 hover:bg-slate-50">Dias úteis</button><button type="button" data-preset="fds" class="rounded border border-slate-300 px-2 py-1 hover:bg-slate-50">Fim de semana</button></div>
+                <div class="flex flex-wrap gap-2">${DIAS_SEMANA.map(([n,l])=>`<label class="inline-flex items-center gap-1 text-sm"><input type="checkbox" class="tn-dia" value="${n}" checked/> ${l}</label>`).join("")}</div>
+              </div>
+              <div><label class="${labelCls}">Acompanha o turno (opcional)</label><select id="tn-segue" class="${inputCls}">${optTurnos(null,null)}</select><p class="mt-1 text-xs text-slate-400">Se escolheres, este turno é feito por quem faz esse turno, no mesmo dia (não é escalado à parte).</p></div>
+              <div><label class="${labelCls}">Cor</label><input id="tn-cor" type="color" value="#6366f1" class="h-10 w-full rounded-lg border border-slate-300"/></div>
+              <button id="tn-add" class="${btnPrimary}">Criar turno</button>
+              <p class="text-xs text-slate-400">O turno só é escalado nos dias marcados. Duração e meia-noite são automáticos.</p>
+            </div></div>`):""}
+        </div>
+      </div>`;
+
+    document.getElementById('eq-add')?.addEventListener('click', async ()=>{
+      const nome=document.getElementById('eq-nome').value.trim(); if(!nome) return;
+      const cor=document.getElementById('eq-cor').value;
+      const { error } = await comRetry(()=> sb.from('equipamentos').insert({ servico_id:sid, nome, cor, ordem:Date.now()%100000 }));
+      if(error) return alert('Não foi possível criar o equipamento (ligação instável). Tenta de novo.'); renderApp();
+    });
+    el.querySelectorAll('[data-del-eq]').forEach(b=>b.addEventListener('click', async ()=>{
+      if(!confirm("Eliminar este equipamento e todos os seus turnos?")) return;
+      await sb.from('equipamentos').delete().eq('id', b.dataset.delEq); renderApp();
+    }));
+
+    el.querySelectorAll('[data-preset]').forEach(b=>b.addEventListener('click', ()=>{
+      const p=b.dataset.preset; const setDias=(arr)=>{ el.querySelectorAll('.tn-dia').forEach(c=>{ c.checked = arr.includes(c.value); }); };
+      if(p==='todos') setDias(['0','1','2','3','4','5','6']);
+      else if(p==='uteis') setDias(['1','2','3','4','5']);
+      else if(p==='fds') setDias(['6','0']);
+    }));
+    document.getElementById('tn-add')?.addEventListener('click', async ()=>{
+      const equipamento_id=document.getElementById('tn-eq').value;
+      const nome=document.getElementById('tn-nome').value.trim();
+      const hi=document.getElementById('tn-ini').value, hf=document.getElementById('tn-fim').value;
+      if(!equipamento_id||!nome||!hi||!hf) return;
+      const dias=[...el.querySelectorAll('.tn-dia:checked')].map(c=>c.value).map(Number).sort((a,b)=>a-b);
+      if(dias.length===0) return alert('Escolhe pelo menos um dia da semana.');
+      const dias_semana = dias.length===7 ? null : dias.join(',');
+      const segue_turno_id = document.getElementById('tn-segue').value || null;
+      const { error } = await comRetry(()=> sb.from('turnos').insert({ servico_id:sid, equipamento_id, nome, hora_inicio:hi, hora_fim:hf,
+        duracao_min:duracaoTurnoMin(hi,hf), atravessa_meia_noite:atravessaMeiaNoite(hi,hf),
+        noturno: ehNoturno(hi)||atravessaMeiaNoite(hi,hf), cor:document.getElementById('tn-cor').value, ordem:Date.now()%100000, dias_semana, segue_turno_id }));
+      if(error) return alert('Não foi possível criar o turno (ligação instável). Tenta de novo. Detalhe: '+(error.message||error));
+      renderApp();
+    });
+    el.querySelectorAll('[data-segue]').forEach(selEl=>selEl.addEventListener('change', async ()=>{
+      const { error } = await comRetry(()=> sb.from('turnos').update({ segue_turno_id: selEl.value||null }).eq('id', selEl.dataset.segue));
+      if(error) return alert('Não foi possível guardar (ligação instável). Tenta de novo.');
+      renderApp();
+    }));
+    el.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click', async ()=>{
+      if(!confirm("Eliminar turno?")) return;
+      await sb.from('turnos').delete().eq('id', b.dataset.del); renderApp();
+    }));
+  }
+
+  async function viewRegras(el, sid){
+    const { html } = await servicoHeader(sid);
+    const { data:regras=[] } = await DB.regras(sid);
+    const descreve = (p)=>{ try{ return Object.entries(p||{}).map(([k,v])=>`${k}: ${v}`).join(" · "); }catch{ return ""; } };
+    el.innerHTML = html + servicoTabs(sid,"regras") + `
+      <div class="grid gap-6 lg:grid-cols-3">
+        <div class="lg:col-span-2 space-y-3">
+          ${regras.length===0?empty("Sem regras","As regras alimentam o motor de validação."):""}
+          ${regras.map(r=>card(`<div class="p-4"><div class="flex items-start justify-between">
+            <div><div class="flex items-center gap-2"><span class="font-medium text-slate-800">${esc(r.nome)}</span>
+              ${r.categoria==="OBRIGATORIA"?badge("obrigatória","red"):badge("preferencial","amber")}${!r.ativa?badge("inativa"):""}</div>
+              <p class="mt-0.5 text-xs text-slate-400">${esc(tipoRegra(r.tipo)?.etiqueta||r.tipo)}</p>
+              <p class="mt-1 text-sm text-slate-500">${esc(descreve(r.parametros))}</p></div>
+            <div class="flex items-center gap-3">
+              <button data-toggle="${r.id}" data-ativa="${r.ativa?1:0}" class="text-xs font-medium text-indigo-600 hover:text-indigo-700">${r.ativa?"desativar":"ativar"}</button>
+              <button data-delr="${r.id}" class="text-xs font-medium text-red-500 hover:text-red-700">eliminar</button>
+            </div></div></div>`)).join("")}
+        </div>
+        ${card(`<div class="p-5"><h2 class="mb-4 text-sm font-semibold text-slate-700">Nova regra</h2>
+          <div class="space-y-3">
+            <div><label class="${labelCls}">Tipo de regra</label><select id="r-tipo" class="${inputCls}">${CATALOGO_REGRAS.map(r=>`<option value="${r.tipo}">${esc(r.etiqueta)}</option>`).join("")}</select>
+              <p id="r-desc" class="mt-1 text-xs text-slate-400"></p></div>
+            <div><label class="${labelCls}">Nome</label><input id="r-nome" class="${inputCls}"/></div>
+            <div><label class="${labelCls}">Categoria</label><select id="r-cat" class="${inputCls}">
+              <option value="OBRIGATORIA">Obrigatória (bloqueia validação)</option><option value="PREFERENCIAL">Preferencial (aviso)</option></select></div>
+            <div id="r-campos" class="space-y-3"></div>
+            <button id="r-add" class="${btnPrimary}">Criar regra</button>
+          </div></div>`,"h-fit")}
+      </div>`;
+
+    const selTipo=document.getElementById('r-tipo');
+    const renderCampos=()=>{
+      const def=tipoRegra(selTipo.value);
+      document.getElementById('r-desc').textContent=def.descricao;
+      document.getElementById('r-nome').value=def.etiqueta;
+      document.getElementById('r-cat').value=def.categoriaSugerida;
+      document.getElementById('r-campos').innerHTML = def.campos.map(c=>{
+        const lab=`${c.etiqueta}${c.sufixo?` (${c.sufixo})`:""}`;
+        if(c.tipo==="select") return `<div><label class="${labelCls}">${esc(lab)}</label><select data-p="${c.chave}" class="${inputCls}">${c.opcoes.map(o=>`<option value="${o.valor}" ${String(o.valor)===String(c.omissao)?"selected":""}>${esc(o.etiqueta)}</option>`).join("")}</select></div>`;
+        return `<div><label class="${labelCls}">${esc(lab)}</label><input data-p="${c.chave}" type="${c.tipo}" value="${esc(c.omissao??"")}" class="${inputCls}"/></div>`;
+      }).join("");
+    };
+    selTipo.addEventListener('change', renderCampos); renderCampos();
+
+    document.getElementById('r-add').addEventListener('click', async ()=>{
+      const def=tipoRegra(selTipo.value);
+      const nome=document.getElementById('r-nome').value.trim()||def.etiqueta;
+      const categoria=document.getElementById('r-cat').value;
+      const parametros={};
+      document.querySelectorAll('#r-campos [data-p]').forEach(inp=>{
+        const chave=inp.dataset.p; const campo=def.campos.find(c=>c.chave===chave);
+        parametros[chave]= campo.tipo==="number" ? Number(inp.value) : inp.value;
+      });
+      const { error } = await sb.from('regras').insert({ servico_id:sid, tipo:def.tipo, nome, categoria, parametros });
+      if(error) return alert(error.message);
+      renderApp();
+    });
+    el.querySelectorAll('[data-toggle]').forEach(b=>b.addEventListener('click', async ()=>{
+      await sb.from('regras').update({ ativa: b.dataset.ativa!=="1" }).eq('id', b.dataset.toggle); renderApp();
+    }));
+    el.querySelectorAll('[data-delr]').forEach(b=>b.addEventListener('click', async ()=>{
+      if(!confirm("Eliminar regra?")) return; await sb.from('regras').delete().eq('id', b.dataset.delr); renderApp();
+    }));
+  }
+
+  async function viewEscalas(el, sid){
+    const { html } = await servicoHeader(sid);
+    const { data:escalas=[] } = await DB.escalas(sid);
+    const hoje=new Date(); const amDefault=`${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}`;
+    el.innerHTML = html + servicoTabs(sid,"escalas") + `
+      <div class="grid gap-6 lg:grid-cols-3">
+        <div class="lg:col-span-2 space-y-3">
+          ${escalas.length===0?empty("Sem escalas","Cria a primeira escala ao lado."):""}
+          ${escalas.map(e=>card(`<div class="flex items-center justify-between gap-2 p-4">
+            <a href="#/servico/${sid}/escala/${e.id}" class="min-w-0 flex-1 hover:opacity-80"><p class="font-medium text-slate-800 truncate">${esc(e.nome)}</p><p class="text-sm text-slate-500">${esc(e.data_inicio)} → ${esc(e.data_fim)}</p></a>
+            <div class="flex items-center gap-3 shrink-0">${badge(e.estado.toLowerCase().replace("_"," "), estadoTone[e.estado]||"slate")}<button data-del-escala="${e.id}" class="text-xs font-medium text-red-500 hover:text-red-700">eliminar</button></div></div>`)).join("")}
+        </div>
+        ${card(`<div class="p-5"><h2 class="mb-4 text-sm font-semibold text-slate-700">Nova escala</h2>
+          <div class="space-y-3">
+            <div><label class="${labelCls}">Nome</label><input id="e-nome" class="${inputCls}" placeholder="Escala ${MESES[hoje.getMonth()]} ${hoje.getFullYear()}"/></div>
+            <div><label class="${labelCls}">Mês</label><input id="e-mes" type="month" value="${amDefault}" class="${inputCls}"/></div>
+            <button id="e-add" class="${btnPrimary}">Criar escala</button>
+            <p class="text-xs text-slate-400">O controlo de horas é sempre mensal.</p>
+          </div></div>`,"h-fit")}
+      </div>`;
+    document.getElementById('e-add').addEventListener('click', async ()=>{
+      const nome=document.getElementById('e-nome').value.trim(); const am=document.getElementById('e-mes').value;
+      if(!nome||!am) return;
+      const [ano,mes]=am.split('-').map(Number);
+      const inicio=new Date(ano,mes-1,1), fim=new Date(ano,mes,0);
+      const { data, error } = await sb.from('escalas').insert({ servico_id:sid, nome, data_inicio:fmtDate(inicio), data_fim:fmtDate(fim), estado:"RASCUNHO" }).select().single();
+      if(error) return alert(error.message);
+      location.hash=`#/servico/${sid}/escala/${data.id}`;
+    });
+    el.querySelectorAll('[data-del-escala]').forEach(b=>b.addEventListener('click', async ()=>{
+      const eid=b.dataset.delEscala;
+      const alvo=escalas.find(x=>x.id===eid);
+      if(!confirm(`Eliminar a escala "${alvo?alvo.nome:''}" e todas as suas atribuições?\n\nEsta ação é permanente e não pode ser anulada.`)) return;
+      await sb.from('atribuicoes').delete().eq('escala_id', eid);
+      const { error } = await sb.from('escalas').delete().eq('id', eid);
+      if(error) return alert(error.message);
+      renderApp();
+    }));
+  }
+
+  async function viewAusencias(el, sid){
+    const { html } = await servicoHeader(sid);
+    const [{data:ausencias=[]},{data:membros=[]}] = await Promise.all([DB.ausencias(sid), DB.membros(sid)]);
+    const tipoTone = { FERIAS:'sky', DOENCA:'amber', BAIXA:'red', OUTRA:'slate' };
+    const hoje = fmtDate(new Date());
+    el.innerHTML = html + servicoTabs(sid,"ausencias") + `
+      <div class="grid gap-6 lg:grid-cols-3">
+        <div class="lg:col-span-2 space-y-3">
+          ${ausencias.length===0?empty("Sem ausências registadas","Regista férias, doença ou outras ausências ao lado."):""}
+          ${ausencias.map(a=>card(`<div class="flex items-center justify-between p-4">
+            <div><div class="flex items-center gap-2"><span class="font-medium text-slate-800">${esc(a.membros?.trabalhadores?.nome||"")}</span>${badge((a.tipo||'').toLowerCase(), tipoTone[a.tipo]||'slate')}</div>
+            <p class="mt-0.5 text-sm text-slate-500">${esc(a.data_inicio)} → ${esc(a.data_fim)}${a.motivo?` · ${esc(a.motivo)}`:''}</p></div>
+            <button data-dela="${a.id}" class="text-xs font-medium text-red-500 hover:text-red-700">remover</button></div>`)).join("")}
+        </div>
+        ${card(`<div class="p-5"><h2 class="mb-4 text-sm font-semibold text-slate-700">Registar ausência</h2>
+          <div class="space-y-3">
+            <div><label class="${labelCls}">Trabalhador</label><select id="au-membro" class="${inputCls}">${membros.map(m=>`<option value="${m.id}">${esc(m.trabalhadores?.nome||"")}</option>`).join("")}</select></div>
+            <div><label class="${labelCls}">Tipo</label><select id="au-tipo" class="${inputCls}"><option value="FERIAS">Férias</option><option value="DOENCA">Doença</option><option value="BAIXA">Baixa</option><option value="OUTRA">Outra</option></select></div>
+            <div class="grid grid-cols-2 gap-3">
+              <div><label class="${labelCls}">Início</label><input id="au-ini" type="date" value="${hoje}" class="${inputCls}"/></div>
+              <div><label class="${labelCls}">Fim</label><input id="au-fim" type="date" value="${hoje}" class="${inputCls}"/></div>
+            </div>
+            <div><label class="${labelCls}">Motivo (opcional)</label><input id="au-motivo" class="${inputCls}"/></div>
+            <button id="au-add" class="${btnPrimary}">Registar</button>
+            <p class="text-xs text-slate-400">As ausências são respeitadas pela geração automática — a pessoa não é escalada nesses dias.</p>
+          </div></div>`,"h-fit")}
+      </div>`;
+    document.getElementById('au-add').addEventListener('click', async ()=>{
+      const membro_id=document.getElementById('au-membro').value, tipo=document.getElementById('au-tipo').value;
+      const di=document.getElementById('au-ini').value, df=document.getElementById('au-fim').value;
+      const motivo=document.getElementById('au-motivo').value.trim()||null;
+      if(!membro_id||!di||!df) return;
+      if(df<di) return alert('A data de fim não pode ser anterior à de início.');
+      const { error } = await sb.from('ausencias').insert({ servico_id:sid, membro_id, tipo, data_inicio:di, data_fim:df, motivo });
+      if(error) return alert(error.message);
+      renderApp();
+    });
+    el.querySelectorAll('[data-dela]').forEach(b=>b.addEventListener('click', async ()=>{
+      await sb.from('ausencias').delete().eq('id', b.dataset.dela); renderApp();
+    }));
+  }
+
+  const DIAS3 = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+
+  function gerarICS(nome, atrs){
+    const pad=n=>String(n).padStart(2,'0');
+    const dt=(dstr,hhmm,addMin)=>{ const [Y,M,D]=dstr.split('-').map(Number); const [h,mi]=hhmm.split(':').map(Number); const b=new Date(Y,M-1,D,h,mi); if(addMin) b.setMinutes(b.getMinutes()+addMin); return b.getFullYear()+pad(b.getMonth()+1)+pad(b.getDate())+'T'+pad(b.getHours())+pad(b.getMinutes())+'00'; };
+    let out='BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//GestaoEscalas//PT\r\nCALSCALE:GREGORIAN\r\n';
+    for(const a of atrs){ const t=a.turnos||{}; out+='BEGIN:VEVENT\r\nUID:'+a.id+'@escalas\r\nDTSTART:'+dt(a.data,t.hora_inicio||'00:00')+'\r\nDTEND:'+dt(a.data,t.hora_inicio||'00:00',t.duracao_min||0)+'\r\nSUMMARY:'+((t.nome||'Turno')+' — '+nome)+'\r\nEND:VEVENT\r\n'; }
+    out+='END:VCALENDAR';
+    return out;
+  }
+  function descarregar(nomeFich, conteudo, mime){
+    const blob=new Blob([conteudo],{type:mime}); const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=nomeFich; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  }
+  function imprimirCom(orientacao){
+    document.getElementById('print-orient')?.remove();
+    const st=document.createElement('style'); st.id='print-orient';
+    st.textContent='@media print{@page{size:A4 '+orientacao+';margin:10mm}}';
+    document.head.appendChild(st);
+    window.print();
+  }
+
+  async function viewTrabalhadorFicha(el, sid, membroId, escalaId){
+    const [{data:membro},{data:turnos=[]},{data:escalas=[]},{data:atrs=[]},{data:ausencias=[]},{data:horasExt=[]}] = await Promise.all([
+      sb.from('membros').select('*, trabalhadores(*)').eq('id', membroId).single(),
+      DB.turnos(sid), DB.escalas(sid),
+      sb.from('atribuicoes').select('*, turnos(*)').eq('membro_id', membroId),
+      sb.from('ausencias').select('*').eq('membro_id', membroId),
+      sb.from('horas_externas').select('*').eq('membro_id', membroId),
+    ]);
+    if(!membro){ el.innerHTML = empty('Trabalhador não encontrado'); return; }
+    const nome = membro.trabalhadores?.nome || '';
+    const contratada = Number(membro.horas_contratadas_mes)||0;
+    const horasDia = Number(membro.horas_dia)||0;
+    const temNorma = horasDia>0 || contratada>0;
+    const extMesMin=(ano,mes)=> horasExt.filter(h=>{ const d=new Date(h.data+'T12:00:00'); return d.getFullYear()===ano&&d.getMonth()+1===mes; }).reduce((s,h)=>s+Number(h.horas||0)*60,0);
+    const escalasAsc = [...escalas].sort((a,b)=>a.data_inicio.localeCompare(b.data_inicio));
+    const escalasDesc = [...escalasAsc].reverse();
+    const escalaSel = escalas.find(e=>e.id===escalaId) || escalasDesc[0] || null;
+    const horasDeEscala = (eid)=> atrs.filter(a=>a.escala_id===eid).reduce((s,a)=>s+(a.turnos?.duracao_min||0),0)/60;
+    const wd = (d)=> new Date(d+'T12:00:00').getDay();
+    const fmt1 = (x)=> x.toFixed(1).replace('.',',');
+
+    // Saldo acumulado até ao mês selecionado (inclusive)
+    const ateSel = escalaSel ? escalasAsc.filter(e=>e.data_inicio<=escalaSel.data_inicio) : [];
+    let acum=0; const acumRows=[];
+    for(const e of ateSel){ const dE=new Date(e.data_inicio+'T12:00:00'); const ano=dE.getFullYear(), mes=dE.getMonth()+1; const realizado=horasDeEscala(e.id)+extMesMin(ano,mes)/60; const esp=esperadoAjustado(membro,ano,mes,ausencias); const sMes=temNorma? realizado-esp : null; if(sMes!=null) acum+=sMes; acumRows.push({nome:e.nome, h:realizado, esp, sMes, acum: temNorma? acum : null}); }
+    const saldoFinal = temNorma? acum : null;
+    let headline;
+    if(saldoFinal==null) headline = `<span class="text-slate-500">Defina as horas por dia do trabalhador para calcular o saldo.</span>`;
+    else if(saldoFinal < -0.05) headline = `<span class="text-3xl font-bold text-red-600">Deve ${fmt1(Math.abs(saldoFinal))} h</span><span class="ml-2 text-sm text-slate-400">acumulado até ${esc(escalaSel.nome)}</span>`;
+    else if(saldoFinal > 0.05) headline = `<span class="text-3xl font-bold text-emerald-600">+${fmt1(saldoFinal)} h</span><span class="ml-2 text-sm text-slate-400">a favor, até ${esc(escalaSel.nome)}</span>`;
+    else headline = `<span class="text-3xl font-bold text-slate-700">Em dia</span>`;
+
+    let turnosMes=[]; const semNada = `<p class="text-sm text-slate-400">Este serviço ainda não tem escalas.</p>`;
+    let blocoCalendario = semNada, blocoIndicadores = semNada;
+    if(escalaSel){
+      turnosMes = atrs.filter(a=>a.escala_id===escalaSel.id).sort((a,b)=>a.data.localeCompare(b.data));
+      const di=new Date(escalaSel.data_inicio+'T12:00:00'); const ano=di.getFullYear(), mes=di.getMonth();
+      const diasNoMes=new Date(ano,mes+1,0).getDate();
+      const min=turnosMes.reduce((s,a)=>s+(a.turnos?.duracao_min||0),0);
+      const extMin=extMesMin(ano,mes);
+      const extMes=horasExt.filter(h=>{ const d=new Date(h.data+'T12:00:00'); return d.getFullYear()===ano&&d.getMonth()+1===mes; }).sort((a,b)=>a.data.localeCompare(b.data));
+      const sabados=turnosMes.filter(a=>wd(a.data)===6).length, domingos=turnosMes.filter(a=>wd(a.data)===0).length;
+      const noites=turnosMes.filter(a=>a.turnos?.noturno).length;
+      const diasTrab=new Set(turnosMes.map(a=>a.data));
+      const contaAus=(tipo)=>{ let c=0; for(let d=1;d<=diasNoMes;d++){ const ds=`${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`; if(ausencias.some(a=>a.membro_id===membroId&&(!tipo||a.tipo===tipo)&&ds>=a.data_inicio&&ds<=a.data_fim)) c++; } return c; };
+      const folgas=Math.max(0,diasNoMes-diasTrab.size-contaAus(null));
+      const porTipo={}; for(const a of turnosMes){ const n=a.turnos?.nome||'—'; porTipo[n]=(porTipo[n]||0)+1; }
+      const feriasN=contaAus('FERIAS'), baixaN=contaAus('BAIXA'), doencaN=contaAus('DOENCA');
+
+      // Mapa (calendário) do funcionário
+      const byDate={}; for(const a of turnosMes){ (byDate[a.data]=byDate[a.data]||[]).push(a); } for(const k in byDate) byDate[k].sort((x,y)=>(x.turnos?.hora_inicio||'').localeCompare(y.turnos?.hora_inicio||''));
+      const ausTipo=(ds)=>{ const a=ausencias.find(x=>x.membro_id===membroId&&ds>=x.data_inicio&&ds<=x.data_fim); return a?a.tipo:null; };
+      const offset=(new Date(ano,mes,1).getDay()+6)%7;
+      let cal=''; for(let i=0;i<offset;i++) cal+='<div></div>';
+      for(let d=1; d<=diasNoMes; d++){
+        const ds=`${ano}-${String(mes+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const dow=new Date(ano,mes,d).getDay(); const fds=(dow===0||dow===6);
+        const arrDia=byDate[ds]||[]; const aus=ausTipo(ds); let inner;
+        if(arrDia.length){ inner = arrDia.map(a=>{ const t=a.turnos||{}; return `<div class="mt-1 truncate rounded px-1 py-0.5 text-[10px] font-semibold text-white" style="background:${esc(t.cor||'#666')}" title="${esc(t.nome||'')} ${esc(t.hora_inicio||'')}–${esc(t.hora_fim||'')}">${esc(t.nome||'')} <span class="opacity-80">${esc(t.hora_inicio||'')}</span></div>`; }).join(''); }
+        else if(aus==='FERIAS') inner='<div class="mt-1 text-[10px] text-amber-600">🏖️ Férias</div>';
+        else if(aus==='BAIXA') inner='<div class="mt-1 text-[10px] text-red-600">Baixa</div>';
+        else if(aus==='DOENCA') inner='<div class="mt-1 text-[10px] text-amber-600">Doença</div>';
+        else if(aus) inner='<div class="mt-1 text-[10px] text-rose-500">Ausente</div>';
+        else inner='<div class="mt-1 text-[10px] italic text-slate-300">folga</div>';
+        cal+=`<div class="fcal rounded-lg border ${fds?'border-slate-200 bg-slate-50':'border-slate-100 bg-white'} p-1 min-h-[58px]"><div class="text-xs font-semibold ${fds?'text-slate-400':'text-slate-500'}">${d}</div>${inner}</div>`;
+      }
+      const nomesDias=['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'];
+      const calHtml = card(`<div class="p-4 print-block"><div class="overflow-x-auto cal-scroll"><div class="min-w-[560px] cal-grid"><div class="mb-1 grid grid-cols-7 gap-1">${nomesDias.map(x=>`<div class="text-center text-xs font-medium text-slate-400">${x}</div>`).join('')}</div><div class="grid grid-cols-7 gap-1">${cal}</div></div></div></div>`);
+
+      // Horas por semana
+      const semanas={}; for(const a of turnosMes){ const dd=new Date(a.data+'T12:00:00'); const dw=(dd.getDay()+6)%7; const mon=new Date(dd); mon.setDate(dd.getDate()-dw); const key=fmtDate(mon); (semanas[key]=semanas[key]||{min:0,n:0}); semanas[key].min+=a.turnos?.duracao_min||0; semanas[key].n++; }
+      const semanaHtml = card(`<table class="w-full text-sm"><thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400"><tr><th class="px-4 py-2.5">Semana de</th><th class="px-4 py-2.5 text-center">Turnos</th><th class="px-4 py-2.5 text-center">Horas</th></tr></thead><tbody class="divide-y divide-slate-100">${Object.entries(semanas).sort((a,b)=>a[0].localeCompare(b[0])).map(([mon,v])=>`<tr><td class="px-4 py-2 text-slate-600">${mon}</td><td class="px-4 py-2 text-center text-slate-600">${v.n}</td><td class="px-4 py-2 text-center text-slate-600">${fmt1(v.min/60)} h</td></tr>`).join('')||'<tr><td colspan="3" class="px-4 py-4 text-center text-slate-400">Sem turnos.</td></tr>'}</tbody></table>`,"overflow-hidden");
+
+      // Ausências do mês
+      const ausMes = ausencias.filter(a=> !(a.data_fim<escalaSel.data_inicio || a.data_inicio>escalaSel.data_fim));
+      const tipoLabel={FERIAS:'Férias',DOENCA:'Doença',BAIXA:'Baixa',OUTRA:'Outra'};
+      const ausHtml = ausMes.length? card(`<div class="p-4"><h3 class="mb-2 text-sm font-semibold text-slate-700">Ausências no mês</h3><ul class="space-y-1 text-sm">${ausMes.map(a=>`<li class="text-slate-600"><b>${tipoLabel[a.tipo]||a.tipo}</b>: ${esc(a.data_inicio)} → ${esc(a.data_fim)}${a.motivo?` · ${esc(a.motivo)}`:''}</li>`).join('')}</ul></div>`) : '';
+
+      const statMesHtml = `<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        ${stat("Turnos",String(turnosMes.length))}${stat("Horas total",fmt1((min+extMin)/60)+" h")}${stat("Sábados",String(sabados))}${stat("Domingos",String(domingos))}${stat("Noites",String(noites))}${stat("Folgas",String(folgas))}</div>`;
+      const extCard = card(`<div class="p-4"><div class="mb-2 flex items-center justify-between"><h3 class="text-sm font-semibold text-slate-700">Horas noutro local</h3><span class="text-sm font-medium ${extMin>0?'text-indigo-600':'text-slate-400'}">${fmt1(extMin/60)} h no mês</span></div>
+        ${extMes.length?`<ul class="mb-3 space-y-1 text-sm">${extMes.map(h=>`<li class="flex items-center justify-between gap-2"><span class="text-slate-600">${esc(h.data)} · <b>${fmt1(Number(h.horas||0))} h</b>${h.local?` · ${esc(h.local)}`:''}${h.descricao?` — ${esc(h.descricao)}`:''}</span><button data-del-ext="${h.id}" class="shrink-0 text-xs font-medium text-red-500 hover:text-red-700 no-print">remover</button></li>`).join('')}</ul>`:`<p class="mb-3 text-sm text-slate-400">Sem horas noutro local neste mês.</p>`}
+        <div class="grid gap-2 no-print sm:grid-cols-6">
+          <input id="ext-data" type="date" min="${esc(escalaSel.data_inicio)}" max="${esc(escalaSel.data_fim)}" value="${esc(escalaSel.data_inicio)}" class="${inputCls} sm:col-span-2"/>
+          <input id="ext-horas" type="number" step="0.5" placeholder="horas" class="${inputCls}"/>
+          <input id="ext-local" placeholder="local" class="${inputCls}"/>
+          <input id="ext-desc" placeholder="descrição" class="${inputCls}"/>
+          <button id="ext-add" class="${btnPrimary}">Adicionar</button>
+        </div>
+        <p class="mt-2 text-xs text-slate-400 no-print">Estas horas contam no total do mês e no saldo acumulado.</p></div>`);
+      const tiposHtml = card(`<div class="p-4"><h3 class="mb-3 text-sm font-semibold text-slate-700">Turnos por tipo</h3><div class="flex flex-wrap gap-2">${Object.entries(porTipo).map(([n,q])=>{ const t=turnos.find(x=>x.nome===n); return `<span class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-sm"><span class="h-2.5 w-2.5 rounded-full" style="background:${esc(t?.cor||'#999')}"></span>${esc(n)} <b>${q}</b></span>`; }).join('')||'<span class="text-sm text-slate-400">Sem turnos.</span>'}${feriasN?`<span class="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-700">🏖️ Férias <b>${feriasN}</b></span>`:''}${doencaN?`<span class="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-700">Doença <b>${doencaN}</b></span>`:''}${baixaN?`<span class="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-sm text-red-700">Baixa <b>${baixaN}</b></span>`:''}</div></div>`);
+      const listaHtml = card(`<table class="w-full text-sm"><thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400"><tr><th class="px-4 py-2.5">Data</th><th class="px-4 py-2.5">Dia</th><th class="px-4 py-2.5">Turno</th><th class="px-4 py-2.5">Horário</th></tr></thead><tbody class="divide-y divide-slate-100">${turnosMes.length===0?`<tr><td colspan="4" class="px-4 py-6 text-center text-slate-400">Sem turnos neste mês.</td></tr>`:turnosMes.map(a=>`<tr><td class="px-4 py-2 text-slate-600">${esc(a.data)}</td><td class="px-4 py-2 text-slate-500">${DIAS3[wd(a.data)]}</td><td class="px-4 py-2"><span class="inline-flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full" style="background:${esc(a.turnos?.cor||'#999')}"></span>${esc(a.turnos?.nome||'')}</span></td><td class="px-4 py-2 text-slate-500">${esc(a.turnos?.hora_inicio||'')}–${esc(a.turnos?.hora_fim||'')}</td></tr>`).join('')}</tbody></table>`,"overflow-hidden");
+      const acumHtml = card(`<table class="w-full text-sm"><thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400"><tr><th class="px-4 py-2.5">Escala</th><th class="px-4 py-2.5 text-center">Realizadas</th><th class="px-4 py-2.5 text-center">Esperado</th><th class="px-4 py-2.5 text-center">Saldo mês</th><th class="px-4 py-2.5 text-center">Acumulado</th></tr></thead><tbody class="divide-y divide-slate-100">${acumRows.map(r=>{ const sc=r.sMes==null?'text-slate-400':r.sMes<-0.05?'text-red-600':r.sMes>0.05?'text-emerald-600':'text-slate-600'; const ac=r.acum==null?'text-slate-400':r.acum<-0.05?'text-red-600':r.acum>0.05?'text-emerald-600':'text-slate-600'; return `<tr><td class="px-4 py-2 text-slate-700">${esc(r.nome)}</td><td class="px-4 py-2 text-center text-slate-600">${fmt1(r.h)}</td><td class="px-4 py-2 text-center text-slate-500">${r.esp!=null?fmt1(r.esp):'—'}</td><td class="px-4 py-2 text-center ${sc}">${r.sMes==null?'—':(r.sMes>0?'+':'')+fmt1(r.sMes)}</td><td class="px-4 py-2 text-center font-semibold ${ac}">${r.acum==null?'—':(r.acum>0?'+':'')+fmt1(r.acum)}</td></tr>`; }).join('')||'<tr><td colspan="5" class="px-4 py-4 text-center text-slate-400">Sem histórico.</td></tr>'}</tbody></table>`,"overflow-hidden");
+
+      blocoCalendario = `<h3 class="mb-2 text-sm font-semibold text-slate-700">Mapa do mês · ${esc(escalaSel.nome)}</h3>${calHtml}`;
+      blocoIndicadores = `
+        ${card(`<div class="p-5 print-block"><p class="text-sm text-slate-500">Saldo acumulado</p><div class="mt-1">${headline}</div></div>`,"mb-3")}
+        <div class="mb-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          ${stat("Total turnos (serviço)",String(atrs.length))}${stat("Total horas (serviço)",fmt1(atrs.reduce((s,a)=>s+(a.turnos?.duracao_min||0),0)/60)+" h")}
+          ${stat("Escalas",String(escalas.length))}${stat("Horas / dia",horasDia?fmt1(horasDia)+" h":(contratada?fmt1(contratada)+" h/mês":"—"))}
+        </div>
+        <h3 class="mb-2 mt-6 text-sm font-semibold text-slate-700">Indicadores do mês · ${esc(escalaSel.nome)}</h3>${statMesHtml}
+        ${horasDia?`<p class="mt-1 text-xs text-slate-400">Esperado do mês: ${diasUteisMes(new Date(escalaSel.data_inicio+'T12:00:00').getFullYear(), new Date(escalaSel.data_inicio+'T12:00:00').getMonth()+1)} dias úteis × ${fmt1(horasDia)} h = ${fmt1(esperadoMes(membro, new Date(escalaSel.data_inicio+'T12:00:00').getFullYear(), new Date(escalaSel.data_inicio+'T12:00:00').getMonth()+1))} h${creditoAusencias(membroId, new Date(escalaSel.data_inicio+'T12:00:00').getFullYear(), new Date(escalaSel.data_inicio+'T12:00:00').getMonth()+1, ausencias, horasDia)>0?` (menos ${fmt1(creditoAusencias(membroId, new Date(escalaSel.data_inicio+'T12:00:00').getFullYear(), new Date(escalaSel.data_inicio+'T12:00:00').getMonth()+1, ausencias, horasDia))} h de férias/baixa, a que tem direito)`:''}.</p>`:''}
+        <div class="mt-4 grid gap-4 lg:grid-cols-2"><div>${tiposHtml}</div><div>${semanaHtml}</div></div>
+        <div class="mt-4">${extCard}</div>
+        ${ausHtml?`<div class="mt-4">${ausHtml}</div>`:''}
+        <h3 class="mb-2 mt-6 text-sm font-semibold text-slate-700">Saldo acumulado (até este mês)</h3>${acumHtml}
+        <p class="mt-1 text-xs text-slate-400">Saldo = horas realizadas (serviço + outro local) − esperado (dias úteis × horas/dia, descontadas férias/baixa a que tem direito). Negativo (vermelho) = deve horas.</p>
+        <h3 class="mb-2 mt-6 text-sm font-semibold text-slate-700">Turnos do mês</h3>${listaHtml}`;
+    }
+
+    const seletor = escalasDesc.length ? `<select id="f-escala" class="${inputCls} max-w-xs no-print">${escalasDesc.map(e=>`<option value="${e.id}" ${escalaSel&&e.id===escalaSel.id?'selected':''}>${esc(e.nome)}</option>`).join('')}</select>` : '';
+
+    el.innerHTML = `
+      <div class="report">
+      <div class="mb-5 no-print"><a href="#/servico/${sid}/trabalhadores" class="text-sm text-slate-400 hover:text-slate-600">← Trabalhadores</a></div>
+      <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div><h1 class="text-2xl font-semibold tracking-tight text-slate-900">${esc(nome)}</h1>
+        <p class="mt-0.5 text-sm text-slate-500">${esc(membro.funcao||'—')}${membro.tipo_jornada?` · ${esc(membro.tipo_jornada)}`:''}${horasDia?` · ${fmt1(horasDia)} h/dia`:(contratada?` · ${fmt1(contratada)} h/mês`:'')}${escalaSel?` · ${esc(escalaSel.nome)}`:''}</p></div>
+        <div class="flex flex-wrap items-center gap-2">${seletor}
+          <button id="f-copiar" class="${btnGhost} no-print">📋 Copiar</button>
+          <button id="f-print" class="${btnGhost} no-print">🖨️ PDF (A4)</button>
+          <button id="f-ics" class="${btnGhost} no-print">📅 .ics</button></div>
+      </div>
+      <div class="mb-4 flex gap-2 no-print">
+        <button id="fv-cal" class="${fichaVista==='calendario'?btnPrimary:btnGhost}">📅 Calendário</button>
+        <button id="fv-ind" class="${fichaVista==='indicadores'?btnPrimary:btnGhost}">📊 Indicadores e estatística</button>
+      </div>
+      ${fichaVista==='calendario'?blocoCalendario:blocoIndicadores}
+      </div>`;
+
+    document.getElementById('fv-cal')?.addEventListener('click', ()=>{ fichaVista='calendario'; renderApp(); });
+    document.getElementById('fv-ind')?.addEventListener('click', ()=>{ fichaVista='indicadores'; renderApp(); });
+    document.getElementById('ext-add')?.addEventListener('click', async ()=>{
+      const data=document.getElementById('ext-data').value; const horas=Number(document.getElementById('ext-horas').value);
+      const local=document.getElementById('ext-local').value.trim()||null; const descricao=document.getElementById('ext-desc').value.trim()||null;
+      if(!data||!horas) return alert('Indica a data e o número de horas.');
+      const { error } = await sb.from('horas_externas').insert({ servico_id:sid, membro_id:membroId, data, horas, local, descricao });
+      if(error) return alert(error.message);
+      fichaVista='indicadores'; renderApp();
+    });
+    el.querySelectorAll('[data-del-ext]').forEach(b=>b.addEventListener('click', async ()=>{
+      await sb.from('horas_externas').delete().eq('id', b.dataset.delExt); fichaVista='indicadores'; renderApp();
+    }));
+
+    const selEl = document.getElementById('f-escala');
+    if(selEl) selEl.addEventListener('change', ()=>{ location.hash = `#/servico/${sid}/trabalhador/${membroId}/${selEl.value}`; });
+    const copiarBtn = document.getElementById('f-copiar');
+    if(copiarBtn) copiarBtn.addEventListener('click', async ()=>{
+      const linhas = turnosMes.map(a=>{ const d=new Date(a.data+'T12:00:00'); return `${a.data} (${DIAS3[d.getDay()]}) — ${a.turnos?.nome||''} ${a.turnos?.hora_inicio||''}-${a.turnos?.hora_fim||''}`; }).join('\n');
+      const txt = `Turnos de ${nome}${escalaSel?` — ${escalaSel.nome}`:''}\n\n${linhas}`;
+      try { await navigator.clipboard.writeText(txt); copiarBtn.textContent='✅ Copiado!'; setTimeout(()=>copiarBtn.textContent='📋 Copiar',1500); }
+      catch { alert(txt); }
+    });
+    const printBtn = document.getElementById('f-print');
+    if(printBtn) printBtn.addEventListener('click', ()=> imprimirCom(fichaVista==='calendario'?'landscape':'portrait'));
+    const icsBtn = document.getElementById('f-ics');
+    if(icsBtn) icsBtn.addEventListener('click', ()=>{
+      if(turnosMes.length===0) return alert('Sem turnos para exportar neste mês.');
+      descarregar(`turnos_${nome.replace(/\s+/g,'_')}.ics`, gerarICS(nome, turnosMes), 'text/calendar');
+    });
+  }
+
+  async function viewRelatorios(el, sid, escalaId){
+    const { html, s: servicoObj } = await servicoHeader(sid);
+    const [{data:membros=[]},{data:turnos=[]},{data:escalas=[]},{data:atrs=[]},{data:ext=[]},{data:ausencias=[]},{data:equipamentos=[]}] = await Promise.all([
+      DB.membros(sid), DB.turnos(sid), DB.escalas(sid),
+      sb.from('atribuicoes').select('*, turnos(*)').eq('servico_id', sid),
+      sb.from('horas_externas').select('*').eq('servico_id', sid),
+      sb.from('ausencias').select('*').eq('servico_id', sid),
+      DB.equipamentos(sid),
+    ]);
+    const eqById = Object.fromEntries(equipamentos.map(e=>[e.id,e]));
+    const escalasAsc=[...escalas].sort((a,b)=>a.data_inicio.localeCompare(b.data_inicio));
+    const escalasDesc=[...escalasAsc].reverse();
+    const escalaSel = escalas.find(e=>e.id===escalaId) || escalasDesc[0] || null;
+    const fmt1=(x)=>x.toFixed(1).replace('.',',');
+    const tById=Object.fromEntries(turnos.map(t=>[t.id,t]));
+    const wd=(d)=>new Date(d+'T12:00:00').getDay();
+    const emMes=(dstr,ano,mes)=>{ const d=new Date(dstr+'T12:00:00'); return d.getFullYear()===ano&&d.getMonth()+1===mes; };
+    const extMesMin=(mid,ano,mes)=> ext.filter(h=>h.membro_id===mid&&emMes(h.data,ano,mes)).reduce((s,h)=>s+Number(h.horas||0)*60,0);
+    const contaAusMes=(mid,ano,mes,tipo)=>{ const diasNoMes=new Date(ano,mes,0).getDate(); let c=0; for(let d=1;d<=diasNoMes;d++){ const ds=`${ano}-${String(mes).padStart(2,'0')}-${String(d).padStart(2,'0')}`; if(ausencias.some(a=>a.membro_id===mid&&(!tipo||a.tipo===tipo)&&ds>=a.data_inicio&&ds<=a.data_fim)) c++; } return c; };
+    const temAtividade=(mid)=> atrs.some(a=>a.membro_id===mid)||ext.some(h=>h.membro_id===mid);
+    const lista = membros.filter(m=>!m.substituto || temAtividade(m.id));
+
+    const sc=(v)=> v==null?'text-slate-400':v<-0.05?'text-red-600':v>0.05?'text-emerald-600':'text-slate-600';
+    const sinal=(v)=> v==null?'—':(v>0?'+':'')+fmt1(v);
+
+    // ---- MENSAL ----
+    let mensalHtml='<p class="text-sm text-slate-400">Este serviço ainda não tem escalas.</p>';
+    if(escalaSel){
+      const di=new Date(escalaSel.data_inicio+'T12:00:00'); const ano=di.getFullYear(), mes=di.getMonth()+1; const diasNoMes=new Date(ano,mes,0).getDate();
+      const rows=lista.map(m=>{
+        const atrM=atrs.filter(a=>a.membro_id===m.id&&a.escala_id===escalaSel.id);
+        const schedMin=atrM.reduce((s,a)=>s+(tById[a.turno_id]?.duracao_min||0),0);
+        const extMin=extMesMin(m.id,ano,mes);
+        const hd=Number(m.horas_dia)||0; const temN = hd>0 || (Number(m.horas_contratadas_mes)||0)>0;
+        const esp=esperadoAjustado(m,ano,mes,ausencias); const totalH=(schedMin+extMin)/60;
+        const diasTrab=new Set(atrM.map(a=>a.data));
+        return { nome:m.trabalhadores?.nome||'', subst:m.substituto, turnos:atrM.length, schedH:schedMin/60, extH:extMin/60, totalH, esp:temN?esp:null, saldo:temN?totalH-esp:null,
+          noites:atrM.filter(a=>tById[a.turno_id]?.noturno).length, sab:atrM.filter(a=>wd(a.data)===6).length, dom:atrM.filter(a=>wd(a.data)===0).length,
+          folgas:Math.max(0,diasNoMes-diasTrab.size-contaAusMes(m.id,ano,mes,null)), feriasN:contaAusMes(m.id,ano,mes,'FERIAS') };
+      });
+      mensalHtml = `<h3 class="mb-2 text-sm font-semibold text-slate-700">Relatório mensal · ${esc(escalaSel.nome)} <span class="font-normal text-slate-400">(${diasUteisMes(ano,mes)} dias úteis)</span></h3>${card(`<table class="w-full text-sm"><thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400"><tr>
+        <th class="px-3 py-2.5">Trabalhador</th><th class="px-3 py-2.5 text-center">Turnos</th><th class="px-3 py-2.5 text-center">H. serviço</th><th class="px-3 py-2.5 text-center">H. outro local</th><th class="px-3 py-2.5 text-center">Total</th><th class="px-3 py-2.5 text-center">Esperado</th><th class="px-3 py-2.5 text-center">Saldo</th><th class="px-3 py-2.5 text-center">Noites</th><th class="px-3 py-2.5 text-center">Sáb</th><th class="px-3 py-2.5 text-center">Dom</th><th class="px-3 py-2.5 text-center">Folgas</th><th class="px-3 py-2.5 text-center">Férias</th></tr></thead>
+        <tbody class="divide-y divide-slate-100">${rows.map(r=>`<tr><td class="px-3 py-2 font-medium text-slate-800">${esc(r.nome)}${r.subst?' <span class="text-xs text-indigo-500">(subst.)</span>':''}</td><td class="px-3 py-2 text-center text-slate-600">${r.turnos}</td><td class="px-3 py-2 text-center text-slate-600">${fmt1(r.schedH)}</td><td class="px-3 py-2 text-center ${r.extH>0?'text-indigo-600 font-medium':'text-slate-400'}">${r.extH>0?fmt1(r.extH):'—'}</td><td class="px-3 py-2 text-center font-semibold text-slate-800">${fmt1(r.totalH)}</td><td class="px-3 py-2 text-center text-slate-500">${r.esp!=null?fmt1(r.esp):'—'}</td><td class="px-3 py-2 text-center font-semibold ${sc(r.saldo)}">${sinal(r.saldo)}</td><td class="px-3 py-2 text-center text-slate-600">${r.noites}</td><td class="px-3 py-2 text-center text-slate-600">${r.sab}</td><td class="px-3 py-2 text-center text-slate-600">${r.dom}</td><td class="px-3 py-2 text-center text-slate-600">${r.folgas}</td><td class="px-3 py-2 text-center ${r.feriasN?'text-amber-600':'text-slate-400'}">${r.feriasN||'—'}</td></tr>`).join('')||'<tr><td colspan="12" class="px-3 py-4 text-center text-slate-400">Sem trabalhadores.</td></tr>'}</tbody></table>`,"overflow-hidden")}
+        <p class="mt-2 text-xs text-slate-400">Esperado = dias úteis × horas/dia, descontadas as férias/baixa (a que o trabalhador tem direito) · Saldo = Total − Esperado.</p>`;
+    }
+
+    // ---- ACUMULADO ----
+    // Intervalo de meses escolhido
+    const desdeE = escalasAsc.find(e=>e.id===relDesde) || escalasAsc[0] || null;
+    const ateE = escalasAsc.find(e=>e.id===relAte) || escalasAsc[escalasAsc.length-1] || null;
+    const escalasRange = (desdeE&&ateE) ? escalasAsc.filter(e=> e.data_inicio>=desdeE.data_inicio && e.data_inicio<=ateE.data_inicio) : escalasAsc;
+    const turnosCols = [...turnos].filter(t=>t.ativo!==false).sort((a,b)=>a.ordem-b.ordem);
+    const fdsLivresMes=(diasSet,ano,mes)=>{ const dim=new Date(ano,mes,0).getDate(); let c=0; for(let d=1;d<=dim;d++){ const dd=new Date(ano,mes-1,d); if(dd.getDay()===6){ const sab=`${ano}-${String(mes).padStart(2,'0')}-${String(d).padStart(2,'0')}`; const domD=new Date(ano,mes-1,d+1); const dom=domD.getMonth()===mes-1?`${ano}-${String(mes).padStart(2,'0')}-${String(d+1).padStart(2,'0')}`:null; if(!diasSet.has(sab)&&!(dom&&diasSet.has(dom))) c++; } } return c; };
+
+    const dadosAc = lista.map(m=>{
+      const hd=Number(m.horas_dia)||0; const temN = hd>0 || (Number(m.horas_contratadas_mes)||0)>0;
+      let turnosN=0, sMinAll=0, eMinAll=0, acum=0, sab=0, dom=0, noites=0, fdsL=0;
+      const porTipo={}, porTipoFDS={}, horasMes={};
+      for(const e of escalasRange){ const di=new Date(e.data_inicio+'T12:00:00'); const ano=di.getFullYear(), mes=di.getMonth()+1;
+        const atrE=atrs.filter(a=>a.membro_id===m.id&&a.escala_id===e.id); const eMin=extMesMin(m.id,ano,mes); let sMin=0;
+        const diasSet=new Set(atrE.map(a=>a.data));
+        for(const a of atrE){ const t=tById[a.turno_id]; if(!t) continue; turnosN++; sMin+=t.duracao_min; if(t.noturno) noites++; const w=wd(a.data); if(w===6) sab++; if(w===0) dom++; porTipo[t.id]=(porTipo[t.id]||0)+1; if(w===0||w===6) porTipoFDS[t.id]=(porTipoFDS[t.id]||0)+1; }
+        sMinAll+=sMin; eMinAll+=eMin; horasMes[e.id]=(sMin+eMin)/60; fdsL+=fdsLivresMes(diasSet,ano,mes);
+        if(temN) acum += (sMin+eMin)/60 - esperadoAjustado(m,ano,mes,ausencias);
+      }
+      return { id:m.id, nome:m.trabalhadores?.nome||'', subst:m.substituto, turnos:turnosN, totalH:(sMinAll+eMinAll)/60, extH:eMinAll/60, sab, dom, noites, fdsL, porTipo, porTipoFDS, horasMes, acum:temN?acum:null };
+    });
+
+    const cab=(t)=>`<th class="px-2 py-2.5 text-center">${esc(t)}</th>`;
+    // Tabela A — resumo de justiça
+    const tabResumo = `<table class="w-full text-sm"><thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400"><tr>
+      <th class="px-3 py-2.5">Trabalhador</th>${cab('Turnos')}${cab('Horas')}${cab('Sáb')}${cab('Dom')}${cab('Noites')}${cab('FDS livres')}${cab('Saldo acum.')}</tr></thead>
+      <tbody class="divide-y divide-slate-100">${dadosAc.map(r=>`<tr><td class="px-3 py-2 font-medium text-slate-800">${esc(r.nome)}${r.subst?' <span class="text-xs text-indigo-500">(subst.)</span>':''}</td><td class="px-2 py-2 text-center text-slate-600">${r.turnos}</td><td class="px-2 py-2 text-center font-semibold text-slate-800">${fmt1(r.totalH)}</td><td class="px-2 py-2 text-center text-slate-600">${r.sab}</td><td class="px-2 py-2 text-center text-slate-600">${r.dom}</td><td class="px-2 py-2 text-center text-slate-600">${r.noites}</td><td class="px-2 py-2 text-center text-slate-600">${r.fdsL}</td><td class="px-2 py-2 text-center text-base font-bold ${sc(r.acum)}">${r.acum==null?'—':sinal(r.acum)}</td></tr>`).join('')||`<tr><td colspan="8" class="px-3 py-4 text-center text-slate-400">Sem dados.</td></tr>`}</tbody></table>`;
+
+    // Tabela B — turnos por tipo (e quantos ao fim de semana)
+    const tabTipos = `<table class="w-full text-sm"><thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400"><tr>
+      <th class="px-3 py-2.5">Trabalhador</th>${turnosCols.map(t=>`<th class="px-2 py-2.5 text-center" title="${esc((eqById[t.equipamento_id]?.nome||'')+' · '+t.nome)}">${esc(t.nome)}<br><span class="text-[9px] font-normal normal-case text-slate-400">${esc(t.hora_inicio)}</span></th>`).join('')}</tr></thead>
+      <tbody class="divide-y divide-slate-100">${dadosAc.map(r=>`<tr><td class="px-3 py-2 font-medium text-slate-800">${esc(r.nome)}</td>${turnosCols.map(t=>{ const tot=r.porTipo[t.id]||0; const f=r.porTipoFDS[t.id]||0; return `<td class="px-2 py-2 text-center text-slate-600">${tot||'—'}${f?` <span class="text-[10px] text-amber-600">(${f} FDS)</span>`:''}</td>`; }).join('')}</tr>`).join('')||`<tr><td colspan="${turnosCols.length+1}" class="px-3 py-4 text-center text-slate-400">Sem dados.</td></tr>`}</tbody></table>`;
+
+    // Tabela C — horas por mês + total
+    const tabHoras = `<table class="w-full text-sm"><thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400"><tr>
+      <th class="px-3 py-2.5">Trabalhador</th>${escalasRange.map(e=>`<th class="px-2 py-2.5 text-center">${esc(e.nome)}</th>`).join('')}${cab('Total')}</tr></thead>
+      <tbody class="divide-y divide-slate-100">${dadosAc.map(r=>`<tr><td class="px-3 py-2 font-medium text-slate-800">${esc(r.nome)}</td>${escalasRange.map(e=>`<td class="px-2 py-2 text-center text-slate-600">${r.horasMes[e.id]?fmt1(r.horasMes[e.id]):'—'}</td>`).join('')}<td class="px-2 py-2 text-center font-semibold text-slate-800">${fmt1(r.totalH)}</td></tr>`).join('')||`<tr><td colspan="${escalasRange.length+2}" class="px-3 py-4 text-center text-slate-400">Sem dados.</td></tr>`}</tbody></table>`;
+
+    const acumHtml = `
+      <div class="mb-3 flex flex-wrap items-center gap-2 no-print text-sm">
+        <span class="text-slate-500">Meses:</span>
+        <select id="rel-desde" class="rounded-lg border border-slate-300 px-2 py-1">${escalasAsc.map(e=>`<option value="${e.id}" ${desdeE&&e.id===desdeE.id?'selected':''}>${esc(e.nome)}</option>`).join('')}</select>
+        <span class="text-slate-400">até</span>
+        <select id="rel-ate" class="rounded-lg border border-slate-300 px-2 py-1">${escalasAsc.map(e=>`<option value="${e.id}" ${ateE&&e.id===ateE.id?'selected':''}>${esc(e.nome)}</option>`).join('')}</select>
+      </div>
+      <h3 class="mb-2 text-sm font-semibold text-slate-700">Resumo de justiça · ${escalasRange.length} mês(es)</h3>${card(tabResumo,"overflow-hidden print-block")}
+      <h3 class="mb-2 mt-6 text-sm font-semibold text-slate-700">Turnos por tipo (e quantos ao fim de semana)</h3>${card(tabTipos,"overflow-hidden print-block")}
+      <h3 class="mb-2 mt-6 text-sm font-semibold text-slate-700">Horas por mês</h3>${card(tabHoras,"overflow-hidden print-block")}
+      <p class="mt-2 text-xs text-slate-400">Saldo acumulado = horas realizadas − esperado (dias úteis × horas/dia, descontadas férias/baixa). Negativo (vermelho) = deve; positivo (verde) = fez a mais. "(n FDS)" = turnos desse tipo feitos ao fim de semana.</p>`;
+
+    el.innerHTML = html + servicoTabs(sid,"relatorios") + `<div class="report">
+      <div class="print-only mb-3"><div class="text-lg font-bold text-slate-900">${esc(servicoObj?.nome||'')}</div><div class="text-sm text-slate-500">Relatório de escalas${servicoObj?.tipo?' · '+esc(servicoObj.tipo):''}</div></div>
+      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2 no-print">
+          <button id="rv-mensal" class="${relVista==='mensal'?btnPrimary:btnGhost}">📅 Mensal</button>
+          <button id="rv-acum" class="${relVista==='acumulado'?btnPrimary:btnGhost}">📈 Acumulado</button>
+          ${relVista==='mensal'&&escalasDesc.length?`<select id="rel-escala" class="${inputCls} max-w-xs">${escalasDesc.map(e=>`<option value="${e.id}" ${escalaSel&&e.id===escalaSel.id?'selected':''}>${esc(e.nome)}</option>`).join('')}</select>`:''}
+        </div>
+        <button id="rel-print" class="${btnGhost} no-print">🖨️ Imprimir / PDF (A4)</button>
+      </div>
+      ${relVista==='mensal'?mensalHtml:acumHtml}
+    </div>`;
+
+    document.getElementById('rv-mensal')?.addEventListener('click',()=>{relVista='mensal';renderApp();});
+    document.getElementById('rv-acum')?.addEventListener('click',()=>{relVista='acumulado';renderApp();});
+    document.getElementById('rel-escala')?.addEventListener('change',(e)=>{ location.hash=`#/servico/${sid}/relatorios/${e.target.value}`; });
+    document.getElementById('rel-desde')?.addEventListener('change',(e)=>{ relDesde=e.target.value; renderApp(); });
+    document.getElementById('rel-ate')?.addEventListener('change',(e)=>{ relAte=e.target.value; renderApp(); });
+    document.getElementById('rel-print')?.addEventListener('click',()=> imprimirCom('landscape'));
+  }
+
+  async function viewRelatoriosPlaceholder(){}
+  const primeiroNome = (n)=> (n||"").trim().split(/\s+/)[0] || "";
+  const DIAS_SEMANA = [['1','Seg'],['2','Ter'],['3','Qua'],['4','Qui'],['5','Sex'],['6','Sáb'],['0','Dom']];
+  function turnoAtivo(t, dow){ if(!t || !t.dias_semana) return true; return t.dias_semana.split(',').map(Number).includes(Number(dow)); }
+  function linkedTurnos(turnos){ const s=new Set(); for(const t of turnos){ if(t.segue_turno_id){ s.add(t.id+'|'+t.segue_turno_id); s.add(t.segue_turno_id+'|'+t.id); } } return s; }
+  function descreveDias(ds){ if(!ds) return 'todos os dias'; const set=ds.split(',').map(Number); if([0,1,2,3,4,5,6].every(x=>set.includes(x))) return 'todos os dias'; if([1,2,3,4,5].every(x=>set.includes(x))&&!set.includes(0)&&!set.includes(6)) return 'dias úteis'; return DIAS_SEMANA.filter(([n])=>set.includes(Number(n))).map(([,l])=>l).join(', '); }
+
+  // --- Cálculo do esperado mensal e crédito de ausências ---
+  function diasUteisMes(ano, mes){ const n=new Date(ano,mes,0).getDate(); let c=0; for(let d=1;d<=n;d++){ const w=new Date(ano,mes-1,d).getDay(); if(w!==0&&w!==6) c++; } return c; }
+  function esperadoMes(membro, ano, mes){ const hd=Number(membro.horas_dia)||0; if(hd>0) return diasUteisMes(ano,mes)*hd; return Number(membro.horas_contratadas_mes)||0; }
+  // dias úteis em que o trabalhador está de férias/doença/baixa × horas/dia (têm direito às horas)
+  function creditoAusencias(membroId, ano, mes, ausencias, horasDia){ if(!horasDia) return 0; const n=new Date(ano,mes,0).getDate(); let dias=0; for(let d=1;d<=n;d++){ const w=new Date(ano,mes-1,d).getDay(); if(w===0||w===6) continue; const ds=`${ano}-${String(mes).padStart(2,'0')}-${String(d).padStart(2,'0')}`; if(ausencias.some(a=>a.membro_id===membroId&&(a.tipo==='FERIAS'||a.tipo==='DOENCA'||a.tipo==='BAIXA')&&ds>=a.data_inicio&&ds<=a.data_fim)) dias++; } return dias*horasDia; }
+  function esperadoAjustado(membro, ano, mes, ausencias){ const hd=Number(membro.horas_dia)||0; return esperadoMes(membro,ano,mes) - creditoAusencias(membro.id||membro.membroId, ano, mes, ausencias, hd); }
+
+  // Grelha de calendário do mês da escala
+  function renderCalendario(escala, turnos, linhas, membros, ausencias){
+    membros = membros || []; ausencias = ausencias || [];
+    const di = new Date(escala.data_inicio+'T00:00:00');
+    const ano = di.getFullYear(), mes = di.getMonth();
+    const diasNoMes = new Date(ano, mes+1, 0).getDate();
+    const turnosOrd = [...turnos].sort((a,b)=>a.ordem-b.ordem);
+    const porData = {};
+    for(const l of linhas){ (porData[l.data] = porData[l.data] || []).push(l); }
+    const ausenciaDe = (mid,dstr,tipo)=> ausencias.some(a=> a.membro_id===mid && dstr>=a.data_inicio && dstr<=a.data_fim && (!tipo || a.tipo===tipo));
+    const primeiro = new Date(ano, mes, 1);
+    const offset = (primeiro.getDay()+6)%7; // 0 = segunda-feira
+    const nomesDias = ['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'];
+
+    let cells = '';
+    for(let i=0;i<offset;i++) cells += `<div></div>`;
+    for(let dia=1; dia<=diasNoMes; dia++){
+      const dstr = `${ano}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+      const dow = new Date(ano, mes, dia).getDay();
+      const fds = (dow===0 || dow===6);
+      const doDia = porData[dstr] || [];
+      const trabalham = new Set(doDia.map(l=>l.membroId));
+      const linhasTurno = turnosOrd.filter(t=>turnoAtivo(t,dow)).map(t=>{
+        const gente = doDia.filter(l=>l.turnoId===t.id);
+        if(gente.length===0){ if(t.segue_turno_id) return ''; return `<div class="flex items-center gap-1 text-[11px] text-red-400"><span class="h-1.5 w-1.5 rounded-full bg-red-300"></span><span class="truncate">${esc(t.nome)}: falta</span></div>`; }
+        return gente.map(g=>`<div class="flex items-start gap-1 text-[11px] leading-tight" title="${esc(t.nome)} ${esc(t.hora_inicio)}–${esc(t.hora_fim)} — ${esc(g.membroNome)}"><span class="mt-1 h-1.5 w-1.5 rounded-full shrink-0" style="background:${esc(t.cor)}"></span><span class="text-slate-700"><span class="text-slate-400">${esc(t.hora_inicio)}–${esc(t.hora_fim)}</span> ${esc(g.membroNome)}</span></div>`).join('');
+      }).join('');
+      // Férias e folgas (distintos de quem trabalha)
+      const feriasHoje = membros.filter(m=> !m.substituto && ausenciaDe(m.id,dstr,'FERIAS'));
+      const outraAusHoje = membros.filter(m=> !m.substituto && !ausenciaDe(m.id,dstr,'FERIAS') && ausenciaDe(m.id,dstr));
+      const folgaHoje = membros.filter(m=> !m.substituto && !trabalham.has(m.id) && !ausenciaDe(m.id,dstr));
+      const extras =
+        feriasHoje.map(m=>`<div class="flex items-center gap-1 text-[11px] text-amber-600" title="Férias — ${esc(m.trabalhadores?.nome||'')}"><span class="shrink-0">🏖️</span><span class="truncate">${esc(m.trabalhadores?.nome||'')}</span></div>`).join('')
+      + outraAusHoje.map(m=>`<div class="flex items-center gap-1 text-[11px] text-rose-500" title="Ausência — ${esc(m.trabalhadores?.nome||'')}"><span class="shrink-0">✖</span><span class="truncate">${esc(m.trabalhadores?.nome||'')}</span></div>`).join('')
+      + folgaHoje.map(m=>`<div class="flex items-center gap-1 text-[11px] text-slate-400" title="Folga — ${esc(m.trabalhadores?.nome||'')}"><span class="h-1.5 w-1.5 rounded-full border border-slate-300 shrink-0"></span><span class="truncate italic">${esc(m.trabalhadores?.nome||'')}</span></div>`).join('');
+      cells += `<div class="rounded-lg border ${fds?'border-slate-200 bg-slate-50':'border-slate-100 bg-white'} p-1.5 min-h-[96px]">
+        <div class="mb-1 text-xs font-semibold ${fds?'text-slate-400':'text-slate-500'}">${dia}</div>
+        <div class="space-y-0.5">${linhasTurno}${extras?`<div class="my-1 border-t border-dashed border-slate-200"></div>${extras}`:''}</div></div>`;
+    }
+    const legenda = turnosOrd.map(t=>`<span class="inline-flex items-center gap-1 text-xs text-slate-500"><span class="h-2 w-2 rounded-full" style="background:${esc(t.cor)}"></span>${esc(t.nome)} <span class="text-slate-400">${esc(t.hora_inicio)}–${esc(t.hora_fim)}</span></span>`).join('');
+    return card(`<div class="p-4 print-block">
+      <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1">${legenda}
+        <span class="inline-flex items-center gap-1 text-xs text-amber-600">🏖️ férias</span>
+        <span class="inline-flex items-center gap-1 text-xs text-slate-400"><span class="h-2 w-2 rounded-full border border-slate-300"></span>folga</span>
+        <span class="inline-flex items-center gap-1 text-xs text-red-400"><span class="h-2 w-2 rounded-full bg-red-300"></span>turno por cobrir</span></div>
+      <div class="overflow-x-auto cal-scroll"><div class="min-w-[720px] cal-grid">
+        <div class="mb-1 grid grid-cols-7 gap-1">${nomesDias.map(d=>`<div class="text-center text-xs font-medium text-slate-400">${d}</div>`).join('')}</div>
+        <div class="grid grid-cols-7 gap-1">${cells}</div>
+      </div></div>
+    </div>`);
+  }
+
+  // Resumo por trabalhador (turnos, horas, saldo, noites, folgas, férias, FDS livres)
+  function renderResumoEscala(escala, membros, turnos, linhas, ausencias){
+    ausencias = ausencias || [];
+    const di = new Date(escala.data_inicio+'T00:00:00');
+    const ano = di.getFullYear(), mes = di.getMonth();
+    const diasNoMes = new Date(ano, mes+1, 0).getDate();
+    const tById = Object.fromEntries(turnos.map(t=>[t.id,t]));
+    const membrosMostrar = membros.filter(m=>!m.substituto || linhas.some(l=>l.membroId===m.id));
+    const mById = Object.fromEntries(membrosMostrar.map(m=>[m.id,m]));
+    const stats = new Map(membrosMostrar.map(m=>[m.id, { nome:m.trabalhadores?.nome||"", min:0, noites:0, turnos:0, dias:new Set() }]));
+    for(const l of linhas){ const s=stats.get(l.membroId); if(!s) continue; s.min+=l.duracaoMin; s.turnos++; s.dias.add(l.data); if(tById[l.turnoId]?.noturno) s.noites++; }
+    const contarAus = (mid,tipo)=>{ let c=0; for(let dia=1;dia<=diasNoMes;dia++){ const dstr=`${ano}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`; if(ausencias.some(a=>a.membro_id===mid && (!tipo||a.tipo===tipo) && dstr>=a.data_inicio && dstr<=a.data_fim)) c++; } return c; };
+    const fdsLivres = (diasSet)=>{ let c=0; for(let dia=1;dia<=diasNoMes;dia++){ const d=new Date(ano,mes,dia); if(d.getDay()===6){ const sab=fmtDate(d), dom=fmtDate(new Date(ano,mes,dia+1)); if(!diasSet.has(sab)&&!diasSet.has(dom)) c++; } } return c; };
+    const rows = [...stats.entries()].map(([mid,s])=>{
+      const m=mById[mid]; const temN=(Number(m.horas_dia)||0)>0 || (Number(m.horas_contratadas_mes)||0)>0;
+      const esp = esperadoAjustado(m, ano, mes+1, ausencias);
+      const horas=s.min/60, ferias=contarAus(mid,'FERIAS'), folgas=diasNoMes-s.dias.size-contarAus(mid,null), saldo=temN?horas-esp:null;
+      const saldoCls = saldo==null?'text-slate-400':saldo>0.05?'text-emerald-600':saldo<-0.05?'text-red-600':'text-slate-600';
+      const fmt1=(x)=>x.toFixed(1).replace('.',',');
+      return `<tr>
+        <td class="px-4 py-2.5 font-medium text-slate-800">${esc(s.nome)}</td>
+        <td class="px-4 py-2.5 text-center text-slate-600">${s.turnos}</td>
+        <td class="px-4 py-2.5 text-center text-slate-600">${fmt1(horas)} h</td>
+        <td class="px-4 py-2.5 text-center text-slate-500">${temN?fmt1(esp)+' h':'—'}</td>
+        <td class="px-4 py-2.5 text-center font-medium ${saldoCls}">${saldo==null?'—':(saldo>0?'+':'')+fmt1(saldo)+' h'}</td>
+        <td class="px-4 py-2.5 text-center text-slate-600">${s.noites}</td>
+        <td class="px-4 py-2.5 text-center text-slate-600">${Math.max(0,folgas)}</td>
+        <td class="px-4 py-2.5 text-center ${ferias?'text-amber-600 font-medium':'text-slate-400'}">${ferias||'—'}</td>
+        <td class="px-4 py-2.5 text-center text-slate-600">${fdsLivres(s.dias)}</td>
+      </tr>`;
+    }).join('');
+    return card(`<div class="print-block">${`<table class="w-full text-sm"><thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400">
+      <tr><th class="px-4 py-3">Trabalhador</th><th class="px-4 py-3 text-center">Turnos</th><th class="px-4 py-3 text-center">Horas</th><th class="px-4 py-3 text-center">Esperado</th><th class="px-4 py-3 text-center">Saldo</th><th class="px-4 py-3 text-center">Noites</th><th class="px-4 py-3 text-center">Folgas</th><th class="px-4 py-3 text-center">Férias</th><th class="px-4 py-3 text-center">FDS livres</th></tr>
+      </thead><tbody class="divide-y divide-slate-100">${rows}</tbody></table>`}</div>`,"overflow-hidden");
+  }
+
+  // Exportar a escala do mês para Excel (.xlsx): matriz + resumo
+  function exportarExcel(escala, membros, turnos, linhas, ausencias){
+    ausencias = ausencias || [];
+    const XLSX = window.XLSX;
+    if(!XLSX){ alert('Biblioteca de Excel não carregou. Verifica a ligação à internet.'); return; }
+    const di = new Date(escala.data_inicio+'T00:00:00');
+    const ano = di.getFullYear(), mes = di.getMonth();
+    const diasNoMes = new Date(ano, mes+1, 0).getDate();
+    const tById = Object.fromEntries(turnos.map(t=>[t.id,t]));
+    const turnosOrd = [...turnos].sort((a,b)=>a.ordem-b.ordem);
+    const abbr = (nome)=> (nome||'').split(/\s+/).map(w=>w[0]).join('').toUpperCase().slice(0,3);
+    const work = {}; for(const l of linhas){ work[l.membroId+'|'+l.data] = tById[l.turnoId]?.nome || l.turnoNome; }
+    const linhasSet = new Set(linhas.map(l=>l.membroId));
+    const membrosMostrar = membros.filter(m=>!m.substituto || linhasSet.has(m.id));
+    const ausDe = (mid,dstr,tipo)=> ausencias.some(a=> a.membro_id===mid && dstr>=a.data_inicio && dstr<=a.data_fim && (!tipo||a.tipo===tipo));
+    const letras = ['D','S','T','Q','Q','S','S'];
+
+    // Folha "Escala": matriz trabalhador x dia
+    const h1 = ['Trabalhador'], h2 = [''];
+    for(let dia=1;dia<=diasNoMes;dia++){ h1.push(dia); h2.push(letras[new Date(ano,mes,dia).getDay()]); }
+    const aoa = [ [escala.nome], [], h1, h2 ];
+    for(const m of membrosMostrar){
+      const row = [m.trabalhadores?.nome||''];
+      for(let dia=1;dia<=diasNoMes;dia++){
+        const dstr = `${ano}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+        const w = work[m.id+'|'+dstr];
+        if(w) row.push(abbr(w));
+        else if(ausDe(m.id,dstr,'FERIAS')) row.push('FÉR');
+        else if(ausDe(m.id,dstr)) row.push('AUS');
+        else row.push(''); // folga
+      }
+      aoa.push(row);
+    }
+    aoa.push([]); aoa.push(['Legenda:']);
+    turnosOrd.forEach(t=> aoa.push([abbr(t.nome)+' = '+t.nome+' ('+t.hora_inicio+'–'+t.hora_fim+')']));
+    aoa.push(['FÉR = Férias   |   AUS = Outra ausência   |   (célula vazia) = Folga']);
+    const ws1 = XLSX.utils.aoa_to_sheet(aoa);
+    ws1['!cols'] = [{wch:20}, ...Array(diasNoMes).fill({wch:4})];
+
+    // Folha "Resumo"
+    const res = [['Trabalhador','Turnos','Horas','Contratadas','Saldo','Noites','Folgas','Férias','FDS livres']];
+    const contarAus=(mid,tipo)=>{ let c=0; for(let dia=1;dia<=diasNoMes;dia++){ const dstr=`${ano}-${String(mes+1).padStart(2,'0')}-${String(dia).padStart(2,'0')}`; if(ausencias.some(a=>a.membro_id===mid && (!tipo||a.tipo===tipo) && dstr>=a.data_inicio && dstr<=a.data_fim)) c++; } return c; };
+    const fdsLivres=(diasSet)=>{ let c=0; for(let dia=1;dia<=diasNoMes;dia++){ const d=new Date(ano,mes,dia); if(d.getDay()===6){ const sab=fmtDate(d),dom=fmtDate(new Date(ano,mes,dia+1)); if(!diasSet.has(sab)&&!diasSet.has(dom)) c++; } } return c; };
+    for(const m of membrosMostrar){
+      let min=0, noites=0, turnosN=0; const dias=new Set();
+      for(const l of linhas){ if(l.membroId!==m.id) continue; min+=l.duracaoMin; turnosN++; dias.add(l.data); if(tById[l.turnoId]?.noturno) noites++; }
+      const horas=min/60, contr=Number(m.horas_contratadas_mes)||0;
+      res.push([ m.trabalhadores?.nome||'', turnosN, +horas.toFixed(1), contr||'', contr?+(horas-contr).toFixed(1):'', noites, Math.max(0,diasNoMes-dias.size-contarAus(m.id,null)), contarAus(m.id,'FERIAS'), fdsLivres(dias) ]);
+    }
+    const ws2 = XLSX.utils.aoa_to_sheet(res);
+    ws2['!cols'] = [{wch:20},{wch:8},{wch:8},{wch:12},{wch:8},{wch:8},{wch:8},{wch:8},{wch:10}];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws1, 'Escala');
+    XLSX.utils.book_append_sheet(wb, ws2, 'Resumo');
+    XLSX.writeFile(wb, `escala_${ano}-${String(mes+1).padStart(2,'0')}.xlsx`);
+  }
+
+  // Vista em lista (tabela) + formulário de atribuição
+  function renderListaEscala(escala, linhas, turnos, membros, rascunho){
+    return `<div class="grid gap-6 lg:grid-cols-3">
+        <div class="lg:col-span-2">${card(`<table class="w-full text-sm"><thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-400">
+          <tr><th class="px-4 py-3">Data</th><th class="px-4 py-3">Turno</th><th class="px-4 py-3">Trabalhador</th><th class="px-4 py-3"></th></tr></thead>
+          <tbody class="divide-y divide-slate-100">
+          ${linhas.length===0?`<tr><td colspan="4" class="px-4 py-8 text-center text-slate-400">Sem atribuições. Adiciona ao lado ou gera automaticamente.</td></tr>`:
+          linhas.map(l=>`<tr><td class="px-4 py-2.5 text-slate-600">${esc(l.data)}</td>
+            <td class="px-4 py-2.5"><span class="inline-flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full" style="background:${esc(l.turnoCor)}"></span>${esc(l.turnoNome)}</span></td>
+            <td class="px-4 py-2.5 font-medium text-slate-800">${esc(l.membroNome)}</td>
+            <td class="px-4 py-2.5 text-right">${rascunho?`<button data-dela="${l.id}" class="text-xs font-medium text-red-500 hover:text-red-700">remover</button>`:""}</td></tr>`).join("")}
+          </tbody></table>`,"overflow-hidden")}</div>
+        ${card(`<div class="p-5"><h3 class="mb-4 text-sm font-semibold text-slate-700">Adicionar atribuição</h3>
+          ${!rascunho?`<p class="text-sm text-slate-400">A escala já não está em rascunho. Reabre-a para editar.</p>`:`
+          <div class="space-y-3">
+            <div><label class="${labelCls}">Data</label><input id="a-data" type="date" min="${esc(escala.data_inicio)}" max="${esc(escala.data_fim)}" value="${esc(escala.data_inicio)}" class="${inputCls}"/></div>
+            <div><label class="${labelCls}">Turno</label><select id="a-turno" class="${inputCls}">${turnos.map(t=>`<option value="${t.id}">${esc(t.nome)} (${esc(t.hora_inicio)}–${esc(t.hora_fim)})</option>`).join("")}</select></div>
+            <div><label class="${labelCls}">Trabalhador</label><select id="a-membro" class="${inputCls}">${membros.map(m=>`<option value="${m.id}">${esc(m.trabalhadores?.nome||"")}${m.substituto?' (subst.)':''}</option>`).join("")}</select></div>
+            <button id="a-add" class="${btnPrimary}">Adicionar</button>
+          </div>`}
+        </div>`,"h-fit")}
+      </div>`;
+  }
+
+  async function viewEscalaDetalhe(el, sid, eid, modo){
+    const [{data:escala},{data:atr=[]},{data:regrasRaw=[]},{data:membros=[]},{data:turnos=[]},{data:ausencias=[]}] = await Promise.all([
+      DB.escala(eid), DB.atribuicoes(eid), DB.regras(sid), DB.membros(sid), DB.turnos(sid), sb.from('ausencias').select('*').eq('servico_id', sid)
+    ]);
+    if(!escala){ el.innerHTML=empty("Escala não encontrada"); return; }
+
+    const linhas = atr.map(a=>({ id:a.id, data:a.data, turnoId:a.turno_id, turnoNome:a.turnos?.nome||"", turnoCor:a.turnos?.cor||"#999",
+      membroId:a.membro_id, membroNome:a.membros?.trabalhadores?.nome||"", duracaoMin:a.turnos?.duracao_min||0 }))
+      .sort((x,y)=> x.data.localeCompare(y.data) || x.turnoNome.localeCompare(y.turnoNome));
+
+    const d=new Date(escala.data_inicio);
+    const ctx={ ano:d.getFullYear(), mes:d.getMonth()+1, atribuicoes: atr.map(a=>({
+      membroId:a.membro_id, membroNome:a.membros?.trabalhadores?.nome||"", data:a.data, turnoId:a.turno_id, turnoNome:a.turnos?.nome||"",
+      duracaoMin:a.turnos?.duracao_min||0, noturno:!!a.turnos?.noturno, horaInicio:a.turnos?.hora_inicio||"00:00", atravessaMeiaNoite:!!a.turnos?.atravessa_meia_noite })), linked: linkedTurnos(turnos) };
+    const regras = regrasRaw.filter(r=>r.ativa).map(r=>({ tipo:r.tipo, nome:r.nome, categoria:r.categoria, parametros:r.parametros }));
+    const violacoes = validarEscala(regras, ctx);
+    const erros=violacoes.filter(v=>v.severidade==="ERRO"), avisos=violacoes.filter(v=>v.severidade==="AVISO");
+    const totalMin=linhas.reduce((s,l)=>s+l.duracaoMin,0);
+    const rascunho = escala.estado==="RASCUNHO";
+
+    // Cobertura completa: verifica cada dia × turno (apanha turnos totalmente vazios)
+    const need = (()=>{ const r=regrasRaw.find(x=>x.tipo==='NECESSIDADES_MINIMAS'&&x.ativa); return r?Number(r.parametros?.min_trabalhadores||1):1; })();
+    const turnosOrdCov = [...turnos].filter(t=>t.ativo!==false && !t.segue_turno_id).sort((a,b)=>a.ordem-b.ordem);
+    const cont={}; for(const l of linhas){ cont[l.data+'|'+l.turnoId]=(cont[l.data+'|'+l.turnoId]||0)+1; }
+    const diasPeriodo=[]; { let dd=new Date(escala.data_inicio+'T12:00:00'); const fimD=new Date(escala.data_fim+'T12:00:00'); while(dd<=fimD){ diasPeriodo.push(fmtDate(dd)); dd.setDate(dd.getDate()+1); } }
+    const pend=[];
+    for(const ds of diasPeriodo){ const dow=new Date(ds+'T12:00:00').getDay(); for(const t of turnosOrdCov){ if(!turnoAtivo(t,dow)) continue; const have=cont[ds+'|'+t.id]||0; if(have<need) pend.push({data:ds, turnoId:t.id, turnoNome:t.nome, turnoCor:t.cor, faltam:need-have}); } }
+    const tudoCoberto = pend.length===0;
+
+    // Painel "dias a ajustar" (colocação manual rápida nos lugares em falta)
+    let ajusteHtml='';
+    if(rascunho && ajustarAberto){
+      const ausDia=(mid,ds)=>ausencias.some(a=>a.membro_id===mid&&ds>=a.data_inicio&&ds<=a.data_fim);
+      const trabalhaDia=(mid,ds)=>linhas.some(l=>l.membroId===mid&&l.data===ds);
+      ajusteHtml = card(`<div class="p-5">
+        <div class="mb-3 flex items-center justify-between"><h3 class="text-sm font-semibold text-slate-700">Dias a ajustar${pend.length?` · ${pend.length} lugar(es)`:''}</h3><button id="aj-fechar" class="text-xs font-medium text-slate-400 hover:text-slate-600 no-print">fechar</button></div>
+        ${pend.length===0?`<p class="text-sm text-emerald-600">Tudo coberto. Podes validar. ✅</p>`:
+        `<div class="space-y-2">${pend.map((p,i)=>{ const cands=membros.filter(m=>!ausDia(m.id,p.data)&&!trabalhaDia(m.id,p.data)); return `<div class="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 text-sm">
+          <span class="inline-flex items-center gap-1.5"><span class="h-2.5 w-2.5 rounded-full" style="background:${esc(p.turnoCor)}"></span><b>${esc(p.data)}</b> · ${esc(p.turnoNome)}</span>
+          <span class="text-xs text-amber-600">faltam ${p.faltam}</span>
+          <span class="ml-auto flex items-center gap-2 no-print">
+            <select data-aj-membro="${i}" class="rounded-md border border-slate-300 px-2 py-1 text-sm">${cands.length?cands.map(m=>`<option value="${m.id}">${esc(m.trabalhadores?.nome||'')}${m.substituto?' (subst.)':''}</option>`).join(''):'<option value="">— ninguém livre —</option>'}</select>
+            <button data-aj-colocar="${i}" data-data="${p.data}" data-turno="${p.turnoId}" class="rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-700">colocar</button>
+          </span></div>`; }).join('')}</div>`}
+      </div>`,"mb-6");
+    }
+
+    const transicoes=[];
+    if(escala.estado==="VALIDADA"){ transicoes.push(["APROVADA","Aprovar",btnPrimary]); transicoes.push(["RASCUNHO","Reabrir",btnGhost]); }
+    if(escala.estado==="APROVADA"){ transicoes.push(["EM_EXECUCAO","Iniciar execução",btnPrimary]); transicoes.push(["RASCUNHO","Reabrir",btnGhost]); }
+
+    const modoVista = (modo==='calendario') ? 'calendario' : 'lista';
+    const tipoToneEx = { FERIAS:'sky', DOENCA:'amber', BAIXA:'red', OUTRA:'slate' };
+    const nomeMembro = (mid)=> (membros.find(m=>m.id===mid)?.trabalhadores?.nome)||'';
+    const ausOverlap = ausencias.filter(a=> !(a.data_fim < escala.data_inicio || a.data_inicio > escala.data_fim));
+    const exHtml = card(`<div class="p-5">
+      <h3 class="mb-3 text-sm font-semibold text-slate-700">Exceções / ausências neste período</h3>
+      ${ausOverlap.length ? `<ul class="mb-3 space-y-1.5">${ausOverlap.map(a=>`<li class="flex items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm"><span class="min-w-0 text-slate-600"><span class="font-medium text-slate-800">${esc(nomeMembro(a.membro_id))}</span> ${badge((a.tipo||'').toLowerCase(), tipoToneEx[a.tipo]||'slate')} <span class="text-slate-400">${esc(a.data_inicio)} → ${esc(a.data_fim)}</span>${a.motivo?` · ${esc(a.motivo)}`:''}</span><button data-del-ex="${a.id}" class="shrink-0 text-xs font-medium text-red-500 hover:text-red-700 no-print">remover</button></li>`).join('')}</ul>` : `<p class="mb-3 text-sm text-slate-400">Sem exceções registadas para este período.</p>`}
+      ${rascunho ? `<div class="grid gap-2 no-print sm:grid-cols-6">
+        <select id="ex-membro" class="${inputCls} sm:col-span-2">${membros.map(m=>`<option value="${m.id}">${esc(m.trabalhadores?.nome||'')}</option>`).join('')}</select>
+        <select id="ex-tipo" class="${inputCls}"><option value="FERIAS">Férias</option><option value="DOENCA">Doença</option><option value="BAIXA">Baixa</option><option value="OUTRA">Outra</option></select>
+        <input id="ex-ini" type="date" min="${esc(escala.data_inicio)}" max="${esc(escala.data_fim)}" value="${esc(escala.data_inicio)}" class="${inputCls}"/>
+        <input id="ex-fim" type="date" min="${esc(escala.data_inicio)}" max="${esc(escala.data_fim)}" value="${esc(escala.data_inicio)}" class="${inputCls}"/>
+        <button id="ex-add" class="${btnPrimary}">Adicionar</button>
+        <input id="ex-motivo" placeholder="Motivo (opcional)" class="${inputCls} sm:col-span-6"/>
+      </div>
+      <p class="mt-2 text-xs text-slate-400 no-print">Ao adicionar, os turnos dessa pessoa nesses dias são removidos. Gera novamente para preencher as faltas.</p>` : `<p class="text-xs text-slate-400">Reabre a escala (rascunho) para adicionar exceções.</p>`}
+    </div>`,"mb-6");
+    const toggle = `<div class="mb-4 flex flex-wrap items-center gap-2 no-print">
+      <a href="#/servico/${sid}/escala/${eid}/lista" class="${modoVista==='lista'?btnPrimary:btnGhost}">Lista</a>
+      <a href="#/servico/${sid}/escala/${eid}/calendario" class="${modoVista==='calendario'?btnPrimary:btnGhost}">📅 Calendário</a>
+      ${modoVista==='calendario'?`<span class="mx-1 hidden h-6 w-px bg-slate-200 sm:inline-block"></span><button id="btn-print" class="${btnGhost}">🖨️ Imprimir / PDF</button><button id="btn-excel" class="${btnGhost}">⬇️ Excel</button>`:''}
+    </div>`;
+    const corpo = modoVista==='calendario'
+      ? renderCalendario(escala, turnos, linhas, membros, ausencias) + `<div class="mt-6 print-block"><h3 class="mb-3 text-sm font-semibold text-slate-700">Resumo por trabalhador</h3>` + renderResumoEscala(escala, membros, turnos, linhas, ausencias) + `</div>`
+      : renderListaEscala(escala, linhas, turnos, membros, rascunho);
+
+    el.innerHTML = `
+      <div class="mb-5"><a href="#/servico/${sid}/escalas" class="text-sm text-slate-400 hover:text-slate-600">← Escalas</a></div>
+      <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div><div class="flex items-center gap-2"><h2 class="text-xl font-semibold text-slate-900">${esc(escala.nome)}</h2>${badge(escala.estado.toLowerCase().replace("_"," "), estadoTone[escala.estado]||"slate")}</div>
+        <p class="mt-0.5 text-sm text-slate-500">${esc(escala.data_inicio)} → ${esc(escala.data_fim)} · ${fmtHoras(totalMin)} planeadas</p></div>
+        <div class="flex flex-wrap gap-2 no-print">${rascunho?`<button id="btn-gerar" class="${btnPrimary}">✨ Gerar automaticamente</button>${linhas.length>0?`<button id="btn-ajustar" class="${btnGhost}">📋 Ajustar dias${pend.length?` (${pend.length})`:''}</button><button id="btn-validar" class="${btnPrimary}">✔️ Validar</button>`:''}`:""}${transicoes.map(([est,lab,cls])=>`<button data-estado="${est}" class="${cls}">${lab}</button>`).join("")}<button id="btn-del-escala" class="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3.5 py-2 text-sm font-medium text-red-600 hover:bg-red-50">Eliminar</button></div>
+      </div>
+      ${card(`<div class="p-5"><div class="mb-3 flex flex-wrap items-center gap-2"><h3 class="text-sm font-semibold text-slate-700">Validação</h3>
+        ${tudoCoberto?badge("tudo coberto","green"):badge(pend.length+" por cobrir","red")}
+        ${erros.length===0?badge("regras ok","green"):badge(erros.length+" erro(s) de regra","red")}${avisos.length>0?badge(avisos.length+" aviso(s)","amber"):""}</div>
+        ${violacoes.length===0?`<p class="text-sm text-slate-400">A escala cumpre todas as regras ativas.</p>`:
+          `<ul class="space-y-1.5">${violacoes.map(v=>`<li class="flex items-start gap-2 text-sm"><span class="${v.severidade==="ERRO"?'text-red-500':'text-amber-500'}">●</span>
+          <span class="text-slate-600"><span class="font-medium text-slate-700">${esc(v.regra)}</span>${v.membroNome?" · "+esc(v.membroNome):""} — ${esc(v.mensagem)}</span></li>`).join("")}</ul>`}
+        ${rascunho && (erros.length>0 || !tudoCoberto)?`<div class="mt-3 flex flex-wrap items-center gap-2 no-print">${erros.length>0?`<button id="btn-corrigir" class="${btnPrimary}">🔧 Corrigir automaticamente</button>`:''}${!tudoCoberto?`<button id="btn-ajustar2" class="${btnGhost}">📋 Ajustar dias em falta (${pend.length})</button>`:''}<span class="text-xs text-red-500">${!tudoCoberto?`Há ${pend.length} lugar(es) por cobrir. `:''}${erros.length>0?'Resolve os erros para poder validar.':''}</span></div>`:""}
+        ${rascunho && tudoCoberto && erros.length===0 && linhas.length>0?`<p class="mt-3 text-sm text-emerald-600 no-print">Tudo coberto e sem erros — podes validar. ✅</p>`:''}
+      </div>`,"mb-6")}
+      ${ajusteHtml}
+      ${exHtml}
+      ${toggle}
+      ${corpo}`;
+
+    const gerarBtn = document.getElementById('btn-gerar');
+    if(gerarBtn) gerarBtn.addEventListener('click', async ()=>{
+      if(linhas.length>0 && !confirm('Isto substitui as atribuições atuais desta escala por uma nova geração automática. Continuar?')) return;
+      gerarBtn.disabled=true; gerarBtn.textContent='A gerar…';
+      try {
+        const res = await gerarEscalaAuto(sid, eid, escala);
+        if(res && res.uncovered>0) alert(`Escala gerada com ${res.total} turnos. ${res.uncovered} lugar(es) ficaram por cobrir sem quebrar regras — vê o painel de validação.`);
+      } catch(e){ alert('Erro ao gerar: '+(e.message||e)); }
+      renderApp();
+    });
+
+    const pbtn = document.getElementById('btn-print');
+    if(pbtn) pbtn.addEventListener('click', ()=> imprimirCom('landscape'));
+    const corrBtn = document.getElementById('btn-corrigir');
+    if(corrBtn) corrBtn.addEventListener('click', async ()=>{
+      corrBtn.disabled=true; corrBtn.textContent='A corrigir…';
+      try {
+        const res = await corrigirEscala(sid, eid, escala);
+        if(res && res.erros>0) alert(`Melhorei o que era possível, mas ainda restam ${res.erros} erro(s). Com poucos trabalhadores pode ser impossível dar fim de semana completo a todos — considera adicionar um trabalhador substituto ou rever as regras.`);
+      } catch(e){ alert('Erro ao corrigir: '+(e.message||e)); }
+      renderApp();
+    });
+
+    const ajBtn = document.getElementById('btn-ajustar');
+    if(ajBtn) ajBtn.addEventListener('click', ()=>{ ajustarAberto=!ajustarAberto; renderApp(); });
+    const ajBtn2 = document.getElementById('btn-ajustar2');
+    if(ajBtn2) ajBtn2.addEventListener('click', ()=>{ ajustarAberto=true; renderApp(); });
+    const ajFechar = document.getElementById('aj-fechar');
+    if(ajFechar) ajFechar.addEventListener('click', ()=>{ ajustarAberto=false; renderApp(); });
+    el.querySelectorAll('[data-aj-colocar]').forEach(b=>b.addEventListener('click', async ()=>{
+      const i=b.dataset.ajColocar; const sel=el.querySelector(`[data-aj-membro="${i}"]`); const membro_id=sel?sel.value:'';
+      if(!membro_id) return alert('Não há ninguém livre para este turno neste dia. Coloca um substituto, ou liberta alguém de outro turno.');
+      const { error } = await sb.from('atribuicoes').insert({ servico_id:sid, escala_id:eid, membro_id, turno_id:b.dataset.turno, data:b.dataset.data, estado:'PLANEADO' });
+      if(error) return alert(error.message);
+      renderApp();
+    }));
+
+    const valBtn = document.getElementById('btn-validar');
+    if(valBtn) valBtn.addEventListener('click', async ()=>{
+      if(!tudoCoberto){ alert(`Ainda há ${pend.length} lugar(es) por cobrir. Vou abrir os dias a ajustar para preencheres.`); ajustarAberto=true; renderApp(); return; }
+      if(erros.length>0){ alert(`Ainda há ${erros.length} erro(s) de regra. Usa "Corrigir automaticamente" ou ajusta à mão antes de validar.`); return; }
+      valBtn.disabled=true; valBtn.textContent='A validar…';
+      await recontabilizar(sid, eid, escala, linhas, membros);
+      await sb.from('escalas').update({ estado:'VALIDADA' }).eq('id', eid);
+      await sb.from('eventos_historico').insert({ servico_id:sid, entidade:'ESCALA', entidade_id:eid, acao:'ESTADO_VALIDADA' });
+      ajustarAberto=false; renderApp();
+    });
+    const xbtn = document.getElementById('btn-excel');
+    if(xbtn) xbtn.addEventListener('click', ()=> exportarExcel(escala, membros, turnos, linhas, ausencias));
+    const dbtn = document.getElementById('btn-del-escala');
+    if(dbtn) dbtn.addEventListener('click', async ()=>{
+      if(!confirm(`Eliminar a escala "${escala.nome}" e todas as suas atribuições?\n\nEsta ação é permanente e não pode ser anulada.`)) return;
+      await sb.from('atribuicoes').delete().eq('escala_id', eid);
+      const { error } = await sb.from('escalas').delete().eq('id', eid);
+      if(error) return alert(error.message);
+      location.hash = `#/servico/${sid}/escalas`;
+    });
+
+    const exAdd = document.getElementById('ex-add');
+    if(exAdd) exAdd.addEventListener('click', async ()=>{
+      const membro_id=document.getElementById('ex-membro').value, tipo=document.getElementById('ex-tipo').value;
+      const di=document.getElementById('ex-ini').value, df=document.getElementById('ex-fim').value;
+      const motivo=document.getElementById('ex-motivo').value.trim()||null;
+      if(!membro_id||!di||!df) return;
+      if(df<di) return alert('A data de fim não pode ser anterior à de início.');
+      const { error } = await sb.from('ausencias').insert({ servico_id:sid, membro_id, tipo, data_inicio:di, data_fim:df, motivo });
+      if(error) return alert(error.message);
+      await sb.from('atribuicoes').delete().eq('escala_id', eid).eq('membro_id', membro_id).gte('data', di).lte('data', df);
+      renderApp();
+    });
+    el.querySelectorAll('[data-del-ex]').forEach(b=>b.addEventListener('click', async ()=>{
+      await sb.from('ausencias').delete().eq('id', b.dataset.delEx); renderApp();
+    }));
+
+    el.querySelectorAll('[data-estado]').forEach(b=>b.addEventListener('click', async ()=>{
+      await sb.from('escalas').update({ estado:b.dataset.estado }).eq('id', eid);
+      await sb.from('eventos_historico').insert({ servico_id:sid, entidade:"ESCALA", entidade_id:eid, acao:"ESTADO_"+b.dataset.estado });
+      renderApp();
+    }));
+    const addBtn=document.getElementById('a-add');
+    if(addBtn) addBtn.addEventListener('click', async ()=>{
+      const data=document.getElementById('a-data').value, turno_id=document.getElementById('a-turno').value, membro_id=document.getElementById('a-membro').value;
+      if(!data||!turno_id||!membro_id) return;
+      const { error } = await comRetry(()=> sb.from('atribuicoes').insert({ servico_id:sid, escala_id:eid, membro_id, turno_id, data, estado:"PLANEADO" }));
+      if(error) return alert(error.message);
+      const ligados = turnos.filter(t=>t.segue_turno_id===turno_id && turnoAtivo(t, new Date(data+'T12:00:00').getDay()));
+      for(const L of ligados){ await comRetry(()=> sb.from('atribuicoes').insert({ servico_id:sid, escala_id:eid, membro_id, turno_id:L.id, data, estado:"PLANEADO" })); }
+      renderApp();
+    });
+    el.querySelectorAll('[data-dela]').forEach(b=>b.addEventListener('click', async ()=>{
+      await sb.from('atribuicoes').delete().eq('id', b.dataset.dela); renderApp();
+    }));
+  }
+
+  // =====================================================================
+  //  Arranque
+  // =====================================================================
+  sb.auth.onAuthStateChange((_e, session)=>{ state.session=session; state.user=session?.user||null; renderApp(); });
+  window.addEventListener('hashchange', ()=>{ if(state.session) renderApp(); });
+  (async ()=>{ const { data:{ session } } = await sb.auth.getSession(); state.session=session; state.user=session?.user||null; renderApp(); })();
+  </script>
+</body>
+</html>
