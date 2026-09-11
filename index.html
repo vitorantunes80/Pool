@@ -1,0 +1,1552 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<title>Transportes DDS</title>
+<style>
+  :root{
+    --bg:#eef2f6; --surface:#ffffff; --surface-2:#f7f9fb;
+    --primary:#15486b; --primary-d:#0f3650; --primary-l:#e7f0f6;
+    --text:#1f2937; --muted:#667085; --border:#e2e8f0;
+    --ok:#2e7d5b; --ok-bg:#e6f4ec;
+    --warn:#b26a00; --warn-bg:#fbf0dd;
+    --info:#1f5f8b; --info-bg:#e5f0f8;
+    --danger:#b3261e; --danger-bg:#fbe9e7;
+    --slate:#5b6b7b; --slate-bg:#eceff2;
+    --radius:12px; --shadow:0 1px 3px rgba(16,40,60,.08),0 1px 2px rgba(16,40,60,.06);
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:15px;line-height:1.45;
+       min-height:100svh;-webkit-text-size-adjust:100%}
+  button,input,select,textarea{font-family:inherit;font-size:16px;color:inherit}
+  a{color:var(--primary)}
+
+  /* ---- App shell ---- */
+  .topbar{position:sticky;top:0;z-index:30;background:var(--primary);color:#fff;
+    padding:calc(env(safe-area-inset-top) + 10px) 16px 10px;box-shadow:var(--shadow)}
+  .topbar h1{margin:0;font-size:17px;font-weight:650;letter-spacing:.2px;display:flex;align-items:center;gap:8px}
+  .topbar .sub{font-size:12px;opacity:.85;font-weight:400}
+  .nav{position:sticky;top:0;z-index:20;background:var(--primary-d);display:flex;gap:4px;overflow-x:auto;
+    padding:6px 10px;scrollbar-width:none}
+  .nav::-webkit-scrollbar{display:none}
+  .nav button{white-space:nowrap;border:0;background:transparent;color:#cfe0ec;padding:8px 12px;border-radius:8px;
+    font-size:14px;font-weight:550;cursor:pointer}
+  .nav button.active{background:rgba(255,255,255,.16);color:#fff}
+  .wrap{max-width:960px;margin:0 auto;padding:14px 12px 40px}
+
+  /* ---- Common ---- */
+  .view-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:2px 0 12px}
+  .view-head h2{margin:0;font-size:19px;font-weight:650}
+  .btn{border:0;border-radius:10px;padding:10px 14px;font-size:14px;font-weight:600;cursor:pointer;
+    display:inline-flex;align-items:center;gap:6px}
+  .btn-primary{background:var(--primary);color:#fff}
+  .btn-primary:active{background:var(--primary-d)}
+  .btn-ghost{background:var(--surface);color:var(--primary);border:1px solid var(--border)}
+  .btn-sm{padding:7px 10px;font-size:13px;border-radius:8px}
+  .btn-danger{background:var(--danger-bg);color:var(--danger)}
+  .btn-block{width:100%;justify-content:center}
+  .btn:disabled{opacity:.5}
+
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .toolbar input,.toolbar select{background:var(--surface);border:1px solid var(--border);border-radius:9px;
+    padding:9px 10px;font-size:14px;flex:1;min-width:120px}
+  .search{flex:2;min-width:150px}
+
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+  .list{display:flex;flex-direction:column;gap:10px}
+  .item{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:12px 13px}
+  .item-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .item-title{font-weight:650;font-size:15px}
+  .item-sub{color:var(--muted);font-size:13px;margin-top:2px}
+  .item-meta{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:13px;color:var(--text)}
+  .item-meta b{color:var(--muted);font-weight:550}
+  .item-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+
+  .pill{display:inline-block;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:650;white-space:nowrap}
+  .p-novo{background:var(--slate-bg);color:var(--slate)}
+  .p-analise{background:var(--info-bg);color:var(--info)}
+  .p-aguardar{background:var(--warn-bg);color:var(--warn)}
+  .p-aprovado{background:var(--ok-bg);color:var(--ok)}
+  .p-indeferido{background:var(--danger-bg);color:var(--danger)}
+  .p-cancelado{background:var(--slate-bg);color:var(--slate)}
+  .p-previsto{background:var(--info-bg);color:var(--info)}
+  .p-realizado{background:var(--ok-bg);color:var(--ok)}
+  .p-comp{background:#efe7f6;color:#6b3fa0}
+  .p-disp{background:var(--ok-bg);color:var(--ok)}
+  .p-indisp{background:var(--danger-bg);color:var(--danger)}
+  .p-manut{background:var(--warn-bg);color:var(--warn)}
+  .p-off{background:var(--slate-bg);color:var(--slate)}
+
+  .empty{text-align:center;color:var(--muted);padding:36px 16px;font-size:14px}
+  .empty b{display:block;color:var(--text);font-size:15px;margin-bottom:4px}
+
+  /* ---- Dashboard ---- */
+  .dash-group{margin-bottom:18px}
+  .dash-group h3{margin:0 0 8px;font-size:13px;color:var(--muted);font-weight:650;letter-spacing:.3px}
+  .stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+  .stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:12px 14px}
+  .stat .n{font-size:24px;font-weight:700;line-height:1}
+  .stat .l{font-size:12.5px;color:var(--muted);margin-top:4px}
+  .stat.accent{background:var(--primary-l);border-color:#cfe0ec}
+  .stat.accent .n{color:var(--primary)}
+
+  /* ---- Modal ---- */
+  .overlay{position:fixed;inset:0;background:rgba(15,30,45,.45);z-index:50;display:none;
+    align-items:flex-end;justify-content:center}
+  .overlay.open{display:flex}
+  .modal{background:var(--surface);width:100%;max-width:620px;max-height:92dvh;border-radius:18px 18px 0 0;
+    display:flex;flex-direction:column;overflow:hidden}
+  @media(min-width:640px){.overlay{align-items:center}.modal{border-radius:18px;max-height:90dvh}}
+  .modal-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;
+    justify-content:space-between;gap:10px;flex:0 0 auto}
+  .modal-head h3{margin:0;font-size:16px;font-weight:650}
+  .modal-x{border:0;background:var(--surface-2);width:32px;height:32px;border-radius:8px;font-size:18px;cursor:pointer;color:var(--muted)}
+  .modal-body{padding:14px 16px;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1 1 auto}
+  .modal-foot{padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:8px;flex:0 0 auto;
+    padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+  .modal-foot .btn{flex:1;justify-content:center}
+
+  .field{margin-bottom:12px}
+  .field label{display:block;font-size:13px;color:var(--muted);font-weight:600;margin-bottom:5px}
+  .field input,.field select,.field textarea{width:100%;background:var(--surface);border:1px solid var(--border);
+    border-radius:9px;padding:10px;font-size:16px}
+  .field textarea{min-height:64px;resize:vertical}
+  .field-row{display:flex;gap:10px}
+  .field-row .field{flex:1}
+  .check{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:550}
+  .check input{width:20px;height:20px}
+  .sub-list{display:flex;flex-direction:column;gap:8px;margin-top:4px}
+  .sub-row{display:flex;gap:8px;align-items:center}
+  .sub-row input{flex:1}
+  .icon-btn{border:1px solid var(--border);background:var(--surface);border-radius:8px;width:38px;height:38px;
+    font-size:16px;cursor:pointer;flex:0 0 auto;color:var(--muted)}
+  .add-line{background:none;border:1px dashed var(--border);color:var(--primary);border-radius:9px;padding:9px;
+    width:100%;font-weight:600;cursor:pointer;font-size:13.5px}
+  .divider{height:1px;background:var(--border);margin:14px 0}
+  .section-label{font-size:13px;font-weight:700;color:var(--text);margin:2px 0 8px}
+  .custo-line{display:flex;justify-content:space-between;align-items:center;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:8px 11px;margin-bottom:8px;font-size:13.5px}
+  .custo-line b{color:var(--primary)}
+  .custo-total{background:var(--primary-l);border-color:#cfe0ec}
+  .custo-total b{font-size:15px}
+
+  /* ---- Toast ---- */
+  .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);
+    background:#1f2937;color:#fff;padding:11px 16px;border-radius:10px;font-size:14px;z-index:80;
+    box-shadow:0 6px 20px rgba(0,0,0,.25);opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;
+    max-width:90%;text-align:center}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.err{background:var(--danger)}
+
+  .banner{background:var(--danger-bg);color:var(--danger);border:1px solid #f3c9c5;border-radius:10px;
+    padding:11px 13px;font-size:13.5px;margin-bottom:12px;display:none}
+  .banner.show{display:block}
+
+  .loading{text-align:center;color:var(--muted);padding:30px;font-size:14px}
+  .timeline{list-style:none;padding:0;margin:0}
+  .timeline li{padding:8px 0 8px 16px;border-left:2px solid var(--border);position:relative;font-size:13.5px}
+  .timeline li:before{content:"";position:absolute;left:-5px;top:12px;width:8px;height:8px;border-radius:50%;background:var(--primary)}
+  .timeline .t{color:var(--muted);font-size:12px}
+
+  /* ---- Relatórios ---- */
+  .rel-count{font-size:13px;color:var(--muted);margin-bottom:8px}
+  .rel-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)}
+  .rel-tab{border-collapse:collapse;width:100%;font-size:13px;min-width:520px}
+  .rel-tab th{background:var(--surface-2);text-align:left;padding:9px 10px;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--muted);font-weight:650}
+  .rel-tab td{padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+  .rel-tab tr:last-child td{border-bottom:0}
+
+  /* ---- Folha do motorista / escala ---- */
+  .esc-page{max-width:720px;margin:0 auto;color:#111}
+  .esc-head{border-bottom:2px solid #111;padding-bottom:8px;margin-bottom:12px}
+  .esc-org{font-size:12px;color:#333}
+  .esc-title{font-size:20px;font-weight:700;margin-top:2px}
+  .esc-meta{font-size:13px;margin-top:2px}
+  .esc-section{background:var(--primary);color:#fff;padding:5px 10px;font-weight:700;border-radius:5px;margin:14px 0 8px;font-size:13px}
+  .esc-section-c{background:#6b3fa0}
+  .esc-serv{border:1px solid #ccc;border-radius:6px;padding:8px 10px;margin-bottom:8px}
+  .esc-serv-h{font-weight:700;margin-bottom:5px;font-size:13.5px}
+  .esc-tab{width:100%;border-collapse:collapse}
+  .esc-tab th{text-align:left;width:128px;color:#555;font-weight:600;vertical-align:top;padding:2px 8px 2px 0;font-size:12.5px}
+  .esc-tab td{padding:2px 0;font-size:12.5px}
+  .esc-day{margin-bottom:4px}
+  .esc-day-h{font-weight:700;background:#eef2f6;color:#15486b;padding:5px 9px;border-radius:5px;margin:10px 0 6px;font-size:13px}
+  .esc-empty{color:#777;font-style:italic;font-size:13px}
+
+  /* ---- Impressão ---- */
+  #printArea{display:none}
+  @media print{
+    @page{margin:14mm}
+    html,body{background:#fff}
+    .topbar,.nav,.wrap,.overlay,.toast{display:none !important}
+    #printArea{display:block !important}
+    .esc-page{page-break-after:always;max-width:none}
+    .esc-page:last-child{page-break-after:auto}
+    .esc-serv{page-break-inside:avoid}
+    .esc-section{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>🚌 Transportes DDS <span class="sub">· Cabeceiras de Basto</span></h1>
+  </div>
+  <nav class="nav" id="nav"></nav>
+  <div class="wrap">
+    <div class="banner" id="banner"></div>
+    <div id="view"><div class="loading">A carregar…</div></div>
+  </div>
+
+  <div class="overlay" id="overlay"><div class="modal" id="modal"></div></div>
+  <div class="toast" id="toast"></div>
+  <div id="printArea"></div>
+
+<script>
+/* =========================================================
+   Configuração Supabase
+========================================================= */
+const SB_URL = 'https://ruthhkhlmyrrzyfwmtls.supabase.co';
+const SB_KEY = 'sb_publishable_ewwb05rGVH8CJYLSCRmm8Q_9vLHLci8';
+const REST = SB_URL + '/rest/v1/';
+const H = { apikey: SB_KEY, 'Content-Type': 'application/json' };
+
+async function sbGet(path){
+  const r = await fetch(REST + path, { headers: H });
+  if(!r.ok) throw new Error('GET ' + path + ' → ' + r.status + ' ' + await r.text());
+  return r.json();
+}
+async function sbInsert(table, body){
+  const r = await fetch(REST + table, { method:'POST',
+    headers:{...H, Prefer:'return=representation'}, body: JSON.stringify(body) });
+  if(!r.ok) throw new Error('INSERT ' + table + ' → ' + r.status + ' ' + await r.text());
+  const j = await r.json(); return Array.isArray(j) ? j[0] : j;
+}
+async function sbUpdate(table, id, body){
+  const r = await fetch(REST + table + '?id=eq.' + id, { method:'PATCH',
+    headers:{...H, Prefer:'return=representation'}, body: JSON.stringify(body) });
+  if(!r.ok) throw new Error('UPDATE ' + table + ' → ' + r.status + ' ' + await r.text());
+  const j = await r.json(); return Array.isArray(j) ? j[0] : j;
+}
+async function sbDelete(table, filter){
+  const r = await fetch(REST + table + '?' + filter, { method:'DELETE',
+    headers:{...H, Prefer:'return=minimal'} });
+  if(!r.ok) throw new Error('DELETE ' + table + ' → ' + r.status + ' ' + await r.text());
+}
+async function logHist(tipo, id, pedidoId, descricao){
+  try{ await sbInsert('historico', { entidade_tipo:tipo, entidade_id:id, pedido_id:pedidoId, descricao }); }
+  catch(e){ console.warn('hist', e); }
+}
+
+/* =========================================================
+   Utilidades
+========================================================= */
+const $ = s => document.querySelector(s);
+const esc = s => (s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const DIAS = ['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
+function fmtData(d){ if(!d) return '—'; const p=String(d).slice(0,10).split('-'); return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:d; }
+function fmtDataDia(d){ if(!d) return '—'; const dt=new Date(String(d).slice(0,10)+'T00:00:00'); return fmtData(d)+', '+DIAS[dt.getDay()]; }
+function fmtHora(h){ return h ? String(h).slice(0,5) : '—'; }
+function fmtEur(v){ return (v==null||v==='') ? '—' : Number(v).toLocaleString('pt-PT',{style:'currency',currency:'EUR'}); }
+function todayISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function weekRange(){ const d=new Date(); const dow=(d.getDay()+6)%7; const mon=new Date(d); mon.setDate(d.getDate()-dow);
+  const sun=new Date(mon); sun.setDate(mon.getDate()+6);
+  const iso=x=>x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
+  return {ini:iso(mon), fim:iso(sun)}; }
+
+let toastT;
+function toast(msg, err){ const t=$('#toast'); t.textContent=msg; t.className='toast show'+(err?' err':'');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.className='toast',2600); }
+
+/* Modal */
+function openModal(html){ $('#modal').innerHTML=html; $('#overlay').classList.add('open'); document.body.style.overflow='hidden'; }
+function closeModal(){ $('#overlay').classList.remove('open'); document.body.style.overflow=''; $('#modal').innerHTML=''; }
+$('#overlay').addEventListener('click', e=>{ if(e.target.id==='overlay') closeModal(); });
+
+/* Confirmação (sem confirm nativo) */
+function confirmar(msg, onYes, danger){
+  openModal(`
+    <div class="modal-head"><h3>Confirmar</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+    <div class="modal-body"><p style="margin:6px 0 2px">${esc(msg)}</p></div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn ${danger?'btn-danger':'btn-primary'}" id="cfmYes">Confirmar</button>
+    </div>`);
+  $('#cfmYes').onclick=async()=>{ try{ await onYes(); }catch(e){ toast(e.message,true);} };
+}
+
+/* =========================================================
+   Estado / caches
+========================================================= */
+const cache = { areas:[], entidades:[], contactos:[], tipos:[], motoristas:[], viaturas:[], taxas:[] };
+async function loadCaches(){
+  const [areas,entidades,contactos,tipos,motoristas,viaturas,taxas] = await Promise.all([
+    sbGet('areas?select=*&order=ordem'),
+    sbGet('entidades?select=*&order=nome'),
+    sbGet('contactos_entidades?select=*&order=principal.desc,nome'),
+    sbGet('tipos_servico?select=*&order=ordem'),
+    sbGet('motoristas?select=*&order=nome'),
+    sbGet('viaturas?select=*&order=matricula'),
+    sbGet('taxas_viatura?select=*'),
+  ]);
+  Object.assign(cache,{areas,entidades,contactos,tipos,motoristas,viaturas,taxas});
+}
+const areaNome = id => (cache.areas.find(a=>a.id===id)||{}).nome || '';
+const entNome  = id => (cache.entidades.find(e=>e.id===id)||{}).nome || '';
+const tipoNome = id => (cache.tipos.find(t=>t.id===id)||{}).nome || '';
+const motNome  = id => (cache.motoristas.find(m=>m.id===id)||{}).nome || '';
+const viatLabel= id => { const v=cache.viaturas.find(x=>x.id===id); return v?(v.matricula+(v.marca?' · '+v.marca:'')):''; };
+function opts(list, sel, valKey, labelFn, placeholder){
+  let h = placeholder!==undefined ? `<option value="">${esc(placeholder)}</option>` : '';
+  list.forEach(o=>{ const v=o[valKey]; h+=`<option value="${esc(v)}" ${v===sel?'selected':''}>${esc(labelFn(o))}</option>`; });
+  return h;
+}
+
+/* =========================================================
+   Navegação
+========================================================= */
+const VIEWS = [
+  ['dashboard','Painel'], ['servicos','Serviços'], ['escalas','Escalas'],
+  ['entidades','Entidades'], ['motoristas','Motoristas'], ['viaturas','Viaturas'], ['tipos','Tipos'],
+  ['relatorios','Relatórios']
+];
+let current = 'dashboard';
+function buildNav(){
+  $('#nav').innerHTML = VIEWS.map(([k,l])=>`<button data-v="${k}" class="${k===current?'active':''}" onclick="go('${k}')">${l}</button>`).join('');
+}
+function go(v){ current=v; buildNav(); render(); }
+function render(){
+  const el=$('#view'); el.innerHTML='<div class="loading">A carregar…</div>';
+  ({dashboard:viewDashboard,servicos:viewServicos,escalas:viewEscalas,entidades:viewEntidades,
+    motoristas:viewMotoristas,viaturas:viewViaturas,tipos:viewTipos,relatorios:viewRelatorios}[current])().catch(e=>{
+    el.innerHTML=`<div class="empty"><b>Ocorreu um erro</b>${esc(e.message)}</div>`;
+  });
+}
+
+/* =========================================================
+   PAINEL
+========================================================= */
+async function viewDashboard(){
+  const wk = weekRange(); const hoje = todayISO();
+  const [serv, mot, viat] = await Promise.all([
+    sbGet('servicos?select=id,data,estado,complementar'),
+    sbGet('motoristas?select=id,estado'),
+    sbGet('viaturas?select=id,estado'),
+  ]);
+  const cS = e => serv.filter(x=>x.estado===e).length;
+  const validadas = serv.filter(s=>s.estado==='Validado'||s.estado==='Realizado');
+  const servHoje = validadas.filter(s=>s.data===hoje);
+  const servSem = validadas.filter(s=>s.data>=wk.ini && s.data<=wk.fim);
+  const hojeIds = servHoje.map(s=>s.id);
+  const smH = await fetchSM(hojeIds); const svH = await fetchSV(hojeIds);
+  const motServ = new Set(smH.map(x=>x.motorista_id).filter(Boolean));
+  const viatServ = new Set(svH.map(x=>x.viatura_id).filter(Boolean));
+  const compSem = servSem.filter(s=>s.complementar);
+  const motAtivos = mot.filter(m=>m.estado==='Ativo');
+
+  function grp(title, cards){ return `<div class="dash-group"><h3>${title}</h3><div class="stats">${cards}</div></div>`; }
+  function st(n,l,accent){ return `<div class="stat ${accent?'accent':''}"><div class="n">${n}</div><div class="l">${l}</div></div>`; }
+
+  $('#view').innerHTML =
+    `<div class="view-head"><h2>Painel</h2></div>`+
+    grp('Fichas por estado',
+      st(cS('Em preparação'),'Em preparação',true)+st(cS('Em análise'),'Em análise')+st(cS('A aguardar informação'),'A aguardar')+
+      st(cS('Validado'),'Validadas')+st(cS('Indeferido'),'Indeferidas'))+
+    grp('Serviços validados',
+      st(servHoje.length,'Hoje',true)+st(servSem.length,'Esta semana')+
+      st(serv.filter(s=>s.estado==='Validado').length,'Por realizar'))+
+    grp('Motoristas',
+      st(motServ.size,'Em serviço hoje')+st(Math.max(motAtivos.length-motServ.size,0),'Disponíveis'))+
+    grp('Viaturas',
+      st(viatServ.size,'Em serviço hoje')+st(viat.filter(v=>v.estado==='Disponível').length,'Disponíveis')+
+      st(viat.filter(v=>v.estado==='Indisponível').length,'Indisponíveis')+
+      st(viat.filter(v=>v.estado==='Manutenção').length,'Manutenção'))+
+    grp('Complementares',
+      st(compSem.length,'Esta semana'));
+}
+
+/* =========================================================
+   PEDIDOS
+========================================================= */
+const EST_PEDIDO = ['Novo','Em análise','A aguardar informação','Aprovado','Indeferido','Cancelado'];
+function pillEstadoPedido(e){
+  const m={'Novo':'p-novo','Em análise':'p-analise','A aguardar informação':'p-aguardar','Aprovado':'p-aprovado','Indeferido':'p-indeferido','Cancelado':'p-cancelado'};
+  return `<span class="pill ${m[e]||'p-novo'}">${esc(e)}</span>`;
+}
+let pedidosData=[], pedidoFiltro={q:'',estado:'',area:''};
+let pedidoServMap={};
+async function viewPedidos(){
+  pedidosData = await sbGet('pedidos?select=*&order=data_pedido.desc,numero.desc');
+  const _srv = await sbGet('servicos?select=id,pedido_id');
+  pedidoServMap={}; _srv.forEach(s=>{ if(s.pedido_id && !pedidoServMap[s.pedido_id]) pedidoServMap[s.pedido_id]=s.id; });
+  $('#view').innerHTML = `
+    <div class="view-head"><h2>Pedidos</h2><button class="btn btn-primary" onclick="editPedido()">+ Novo</button></div>
+    <div class="toolbar">
+      <input class="search" id="pq" placeholder="Pesquisar nº, entidade, destino…" value="${esc(pedidoFiltro.q)}">
+      <select id="pest">${opts(EST_PEDIDO.map(e=>({v:e})),pedidoFiltro.estado,'v',o=>o.v,'Todos os estados')}</select>
+      <select id="par">${opts(cache.areas,pedidoFiltro.area,'id',a=>a.nome,'Todas as áreas')}</select>
+    </div>
+    <div id="pedList" class="list"></div>`;
+  $('#pq').oninput=e=>{pedidoFiltro.q=e.target.value;renderPedList();};
+  $('#pest').onchange=e=>{pedidoFiltro.estado=e.target.value;renderPedList();};
+  $('#par').onchange=e=>{pedidoFiltro.area=e.target.value;renderPedList();};
+  renderPedList();
+}
+function renderPedList(){
+  const q=pedidoFiltro.q.toLowerCase();
+  let list=pedidosData.filter(p=>{
+    if(pedidoFiltro.estado && p.estado!==pedidoFiltro.estado) return false;
+    if(pedidoFiltro.area && p.area_id!==pedidoFiltro.area) return false;
+    if(q){ const s=(p.numero+' '+entNome(p.entidade_id)+' '+(p.destino||'')+' '+(p.descricao||'')).toLowerCase();
+      if(!s.includes(q)) return false; }
+    return true;
+  });
+  const el=$('#pedList');
+  if(!list.length){ el.innerHTML=`<div class="empty"><b>Sem pedidos</b>Cria o primeiro pedido com o botão “+ Novo”.</div>`; return; }
+  el.innerHTML=list.map(p=>`
+    <div class="item">
+      <div class="item-top">
+        <div><div class="item-title">${esc(p.numero||'—')} · ${esc(entNome(p.entidade_id))}</div>
+          <div class="item-sub">${esc(areaNome(p.area_id))} · ${esc(tipoNome(p.tipo_servico_id)||'—')}</div></div>
+        ${pillEstadoPedido(p.estado)}
+      </div>
+      <div class="item-meta">
+        <span><b>Data pretendida:</b> ${fmtData(p.data_pretendida)}</span>
+        <span><b>Saída:</b> ${fmtHora(p.hora_saida)}</span>
+        <span><b>Regresso:</b> ${fmtHora(p.hora_regresso)}</span>
+        <span><b>Destino:</b> ${esc(p.destino||'—')}</span>
+        <span><b>Passageiros:</b> ${p.num_passageiros??'—'}</span>
+      </div>
+      <div class="item-actions">
+        <button class="btn btn-ghost btn-sm" onclick="editPedido('${p.id}')">Abrir</button>
+        <button class="btn btn-ghost btn-sm" onclick="verHistorico('${p.id}')">Histórico</button>
+        ${pedidoServMap[p.id]
+          ? `<button class="btn btn-primary btn-sm" onclick="editServico('${pedidoServMap[p.id]}')">Ver serviço</button>`
+          : (p.estado==='Aprovado'?`<button class="btn btn-primary btn-sm" onclick="criarServicoDePedido('${p.id}')">Criar serviço</button>`:'')}
+      </div>
+    </div>`).join('');
+}
+
+async function editPedido(id){
+  let p = id ? await sbGet('pedidos?id=eq.'+id).then(r=>r[0]) : {estado:'Novo'};
+  let pontos = id ? await sbGet('pontos_recolha?select=*&pedido_id=eq.'+id+'&order=ordem') : [];
+  let pviat = id ? await sbGet('pedido_viaturas?select=viatura_id&pedido_id=eq.'+id).then(r=>r.map(x=>x.viatura_id)) : [];
+  openModal(pedidoForm(p, pontos, pviat));
+  wirePedidoForm(p);
+}
+function pontosRows(pontos){
+  const rows = (pontos.length?pontos:[{local:''}]).map((pt,i)=>`
+    <div class="sub-row"><input class="pt-input" placeholder="Ponto de recolha ${i+1}" value="${esc(pt.local||'')}">
+      <button type="button" class="icon-btn" onclick="this.parentNode.remove()">×</button></div>`).join('');
+  return rows;
+}
+function pedidoForm(p, pontos, pviat){
+  return `
+  <div class="modal-head"><h3>${p.id?'Pedido '+esc(p.numero||''):'Novo pedido'}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-body">
+    <div class="field-row">
+      <div class="field"><label>Área</label><select id="f_area">${opts(cache.areas,p.area_id,'id',a=>a.nome,'—')}</select></div>
+      <div class="field"><label>Estado</label><select id="f_estado">${opts(EST_PEDIDO.map(e=>({v:e})),p.estado,'v',o=>o.v)}</select></div>
+    </div>
+    <div class="field"><label>Entidade requerente</label><select id="f_ent"></select></div>
+    <div class="field"><label>Contacto</label><select id="f_cont"></select></div>
+    <div class="field"><label>Tipo de serviço</label><select id="f_tipo"></select></div>
+    <div class="field-row">
+      <div class="field"><label>Data pretendida</label><input type="date" id="f_datap" value="${esc(p.data_pretendida||'')}"></div>
+      <div class="field"><label>Passageiros</label><input type="number" id="f_pass" inputmode="numeric" value="${esc(p.num_passageiros??'')}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Hora de saída</label><input type="time" id="f_saida" value="${fmtHora(p.hora_saida)==='—'?'':fmtHora(p.hora_saida)}"></div>
+      <div class="field"><label>Hora de regresso</label><input type="time" id="f_reg" value="${fmtHora(p.hora_regresso)==='—'?'':fmtHora(p.hora_regresso)}"></div>
+    </div>
+    <div class="section-label">Pontos de recolha</div>
+    <div class="sub-list" id="pontosBox">${pontosRows(pontos)}</div>
+    <button type="button" class="add-line" onclick="addPonto()">+ Adicionar ponto</button>
+    <div class="field" style="margin-top:12px"><label>Destino</label><input id="f_dest" value="${esc(p.destino||'')}"></div>
+    <div class="field"><label>Descrição do serviço</label><textarea id="f_desc">${esc(p.descricao||'')}</textarea></div>
+    <div class="section-label">Contabilização de custos</div>
+    <div class="field"><label>Distância (km)</label><input type="number" id="f_km" inputmode="decimal" value="${esc(p.distancia_km??'')}"></div>
+    <label class="check" style="margin-bottom:8px"><input type="checkbox" id="f_ckm" ${p.contab_km?'checked':''}> Contabilizar custo de transporte (km)</label>
+    <label class="check" style="margin-bottom:8px"><input type="checkbox" id="f_cmot" ${p.contab_motorista?'checked':''}> Contabilizar custo com motorista (horas)</label>
+    <div class="section-label" style="margin-top:10px">Viaturas necessárias</div>
+    <div id="viatBox" class="sub-list">${viatRows(pviat)}</div>
+    <button type="button" class="add-line" onclick="addPedViat()">+ Adicionar viatura</button>
+    <div class="item-sub" style="margin:8px 2px 0">Lotação: <b id="f_lot">0</b> / <span id="f_passv">0</span> lugares</div>
+    <div class="custo-line custo-total" id="f_custokm_line" style="margin-top:8px"><span>Custo de transporte (km)</span><b id="f_custokm">—</b></div>
+    <div class="item-sub" style="margin:2px 0 6px">Os motoristas e as horas são atribuídos no serviço.</div>
+    <div class="field"><label>Observações</label><textarea id="f_obs">${esc(p.observacoes||'')}</textarea></div>
+  </div>
+  <div class="modal-foot">
+    ${p.id?`<button class="btn btn-danger" onclick="apagarPedido('${p.id}')">Apagar</button>`:''}
+    <button class="btn btn-primary" id="savePed">Guardar</button>
+  </div>`;
+}
+function addPonto(){ const box=$('#pontosBox'); const d=document.createElement('div'); d.className='sub-row';
+  d.innerHTML=`<input class="pt-input" placeholder="Ponto de recolha"><button type="button" class="icon-btn" onclick="this.parentNode.remove()">×</button>`;
+  box.appendChild(d); }
+function viatOptions(sel){ return opts(cache.viaturas,sel,'id',v=>v.matricula+(v.lotacao?' ('+v.lotacao+' lug.)':''),'— escolher —'); }
+function viatRow(sel){ return `<div class="sub-row"><select class="pv-sel" onchange="recalcPedido()">${viatOptions(sel)}</select><button type="button" class="icon-btn" onclick="this.parentNode.remove();recalcPedido()">×</button></div>`; }
+function viatRows(pviat){ const arr=(pviat&&pviat.length)?pviat:['']; return arr.map(viatRow).join(''); }
+function addPedViat(){ const box=$('#viatBox'); const d=document.createElement('div'); d.className='sub-row';
+  d.innerHTML=`<select class="pv-sel" onchange="recalcPedido()">${viatOptions('')}</select><button type="button" class="icon-btn" onclick="this.parentNode.remove();recalcPedido()">×</button>`;
+  box.appendChild(d); recalcPedido(); }
+function recalcPedido(){
+  const km=Number($('#f_km')&&$('#f_km').value)||0;
+  const contabKm=$('#f_ckm')&&$('#f_ckm').checked;
+  const pass=Number($('#f_pass')&&$('#f_pass').value)||0;
+  let lot=0, custo=0;
+  document.querySelectorAll('#viatBox .pv-sel').forEach(sel=>{ const v=cache.viaturas.find(x=>x.id===sel.value); if(v){ lot+=Number(v.lotacao)||0; if(contabKm) custo+=custoKmViatura(v.id,km); } });
+  if($('#f_lot')){ $('#f_lot').textContent=lot; $('#f_lot').style.color=(pass&&lot<pass)?'var(--danger)':'var(--ok)'; }
+  if($('#f_passv')) $('#f_passv').textContent=pass;
+  if($('#f_custokm_line')) $('#f_custokm_line').style.display=contabKm?'flex':'none';
+  if($('#f_custokm')) $('#f_custokm').textContent=fmtEur(custo);
+}
+function fillEntSelect(areaId, selEnt){
+  const list=cache.entidades.filter(e=>e.area_id===areaId && e.ativo!==false);
+  $('#f_ent').innerHTML=opts(list, selEnt,'id',e=>e.nome,'—');
+}
+function fillContSelect(entId, selCont){
+  const list=cache.contactos.filter(c=>c.entidade_id===entId && c.ativo!==false);
+  $('#f_cont').innerHTML=opts(list, selCont,'id',c=>c.nome+(c.telefone?' · '+c.telefone:''),'—');
+}
+function fillTipoSelect(areaId, selTipo){
+  const list=cache.tipos.filter(t=>(t.area_id===areaId||t.area_id==null) && t.ativo!==false);
+  $('#f_tipo').innerHTML=opts(list, selTipo,'id',t=>t.nome,'—');
+}
+function wirePedidoForm(p){
+  fillEntSelect(p.area_id, p.entidade_id);
+  fillContSelect(p.entidade_id, p.contacto_id);
+  fillTipoSelect(p.area_id, p.tipo_servico_id);
+  $('#f_area').onchange=e=>{ fillEntSelect(e.target.value); fillTipoSelect(e.target.value); $('#f_cont').innerHTML='<option value="">—</option>'; };
+  $('#f_ent').onchange=e=>fillContSelect(e.target.value);
+  ['f_km','f_ckm','f_cmot','f_pass'].forEach(id=>{ const el=$('#'+id); if(el){ el.addEventListener('input',recalcPedido); el.addEventListener('change',recalcPedido); } });
+  recalcPedido();
+  $('#savePed').onclick=()=>savePedido(p);
+}
+function collectPontos(){
+  return [...document.querySelectorAll('#pontosBox .pt-input')].map(i=>i.value.trim()).filter(Boolean);
+}
+async function savePedido(p){
+  const body={
+    area_id:$('#f_area').value||null, entidade_id:$('#f_ent').value||null, contacto_id:$('#f_cont').value||null,
+    tipo_servico_id:$('#f_tipo').value||null, data_pretendida:$('#f_datap').value||null,
+    hora_saida:$('#f_saida').value||null, hora_regresso:$('#f_reg').value||null,
+    destino:$('#f_dest').value.trim()||null, num_passageiros:$('#f_pass').value?Number($('#f_pass').value):null,
+    descricao:$('#f_desc').value.trim()||null, observacoes:$('#f_obs').value.trim()||null, estado:$('#f_estado').value,
+    distancia_km:$('#f_km').value?Number($('#f_km').value):null,
+    contab_km:$('#f_ckm').checked, contab_motorista:$('#f_cmot').checked
+  };
+  if(!body.area_id||!body.entidade_id){ toast('Área e entidade são obrigatórias',true); return; }
+  $('#savePed').disabled=true;
+  try{
+    const pontos=collectPontos();
+    const viats=[...new Set([...document.querySelectorAll('#viatBox .pv-sel')].map(x=>x.value).filter(Boolean))];
+    let pid;
+    if(p.id){
+      const estadoAntigo=p.estado; pid=p.id;
+      await sbUpdate('pedidos',p.id,body);
+      if(estadoAntigo!==body.estado) await logHist('pedido',p.id,p.id,'Estado alterado para '+body.estado);
+      toast('Pedido atualizado');
+    }else{
+      const novo=await sbInsert('pedidos',body); pid=novo.id;
+      await logHist('pedido',novo.id,novo.id,'Pedido criado');
+      toast('Pedido '+(novo.numero||'')+' criado');
+    }
+    await sbDelete('pontos_recolha','pedido_id=eq.'+pid);
+    for(let i=0;i<pontos.length;i++) await sbInsert('pontos_recolha',{pedido_id:pid,local:pontos[i],ordem:i});
+    await sbDelete('pedido_viaturas','pedido_id=eq.'+pid);
+    for(const vid of viats) await sbInsert('pedido_viaturas',{pedido_id:pid,viatura_id:vid});
+    closeModal(); if(current==='pedidos') viewPedidos();
+  }catch(e){ toast(e.message,true); $('#savePed').disabled=false; }
+}
+function apagarPedido(id){ confirmar('Apagar este pedido? Os serviços associados ficam sem pedido.', async()=>{
+  await sbDelete('pedidos','id=eq.'+id); closeModal(); toast('Pedido apagado'); viewPedidos(); }, true); }
+
+async function verHistorico(pedidoId){
+  const h=await sbGet('historico?select=*&pedido_id=eq.'+pedidoId+'&order=created_at.asc');
+  openModal(`
+    <div class="modal-head"><h3>Histórico</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      ${h.length?`<ul class="timeline">${h.map(x=>`<li><div>${esc(x.descricao)}</div><div class="t">${new Date(x.created_at).toLocaleString('pt-PT')}</div></li>`).join('')}</ul>`
+        :'<div class="empty">Sem registos de histórico.</div>'}
+    </div>
+    <div class="modal-foot"><button class="btn btn-primary" onclick="closeModal()">Fechar</button></div>`);
+}
+
+/* =========================================================
+   SERVIÇOS
+========================================================= */
+const EST_SERV=['Em preparação','Em análise','A aguardar informação','Validado','Realizado','Indeferido','Cancelado'];
+function pillEstadoServ(e){ const m={'Em preparação':'p-novo','Em análise':'p-analise','A aguardar informação':'p-aguardar','Validado':'p-aprovado','Realizado':'p-realizado','Indeferido':'p-indeferido','Cancelado':'p-cancelado'}; return `<span class="pill ${m[e]||'p-novo'}">${esc(e)}</span>`; }
+let servData=[], servFiltro={q:'',estado:'',motorista:'',tipoComp:''}, servSV={}, servSM={};
+async function viewServicos(){
+  servData=await sbGet('servicos?select=*&order=data.desc,hora_saida');
+  const ids=servData.map(s=>s.id);
+  servSV=groupBy(await fetchSV(ids),'servico_id');
+  servSM=groupBy(await fetchSM(ids),'servico_id');
+  $('#view').innerHTML=`
+    <div class="view-head"><h2>Serviços</h2><button class="btn btn-primary" onclick="editServico()">+ Nova ficha</button></div>
+    <div class="toolbar">
+      <input class="search" id="sq" placeholder="Pesquisar nº, entidade, destino…" value="${esc(servFiltro.q)}">
+      <select id="sest">${opts(EST_SERV.map(e=>({v:e})),servFiltro.estado,'v',o=>o.v,'Todos os estados')}</select>
+    </div>
+    <div class="toolbar">
+      <select id="smot">${opts(cache.motoristas,servFiltro.motorista,'id',m=>m.nome,'Todos os motoristas')}</select>
+      <select id="scomp">
+        <option value="">Normais + complementares</option>
+        <option value="0" ${servFiltro.tipoComp==='0'?'selected':''}>Só normais</option>
+        <option value="1" ${servFiltro.tipoComp==='1'?'selected':''}>Só complementares</option>
+      </select>
+    </div>
+    <div id="servList" class="list"></div>`;
+  $('#sq').oninput=e=>{servFiltro.q=e.target.value;renderServList();};
+  $('#sest').onchange=e=>{servFiltro.estado=e.target.value;renderServList();};
+  $('#smot').onchange=e=>{servFiltro.motorista=e.target.value;renderServList();};
+  $('#scomp').onchange=e=>{servFiltro.tipoComp=e.target.value;renderServList();};
+  renderServList();
+}
+function servViaturasLabel(id){ return (servSV[id]||[]).map(x=>viatLabel(x.viatura_id)).filter(Boolean).join(', ')||'—'; }
+function servMotoristasLabel(id){ return (servSM[id]||[]).map(x=>motNome(x.motorista_id)).filter(Boolean).join(', ')||'—'; }
+function servCustoTotal(id){ const ck=(servSV[id]||[]).reduce((a,x)=>a+(Number(x.custo_km)||0),0); const cm=(servSM[id]||[]).reduce((a,x)=>a+(Number(x.custo_motorista)||0),0); return ck+cm; }
+function renderServList(){
+  const q=servFiltro.q.toLowerCase();
+  let list=servData.filter(s=>{
+    if(servFiltro.estado && s.estado!==servFiltro.estado) return false;
+    if(servFiltro.motorista && !(servSM[s.id]||[]).some(x=>x.motorista_id===servFiltro.motorista)) return false;
+    if(servFiltro.tipoComp==='1' && !s.complementar) return false;
+    if(servFiltro.tipoComp==='0' && s.complementar) return false;
+    if(q){ const t=((s.numero||'')+' '+entNome(s.entidade_id)+' '+(s.destino||'')+' '+(s.descricao||'')).toLowerCase(); if(!t.includes(q)) return false; }
+    return true;
+  });
+  const el=$('#servList');
+  if(!list.length){ el.innerHTML=`<div class="empty"><b>Sem fichas</b>Cria a primeira ficha com “+ Nova ficha”.</div>`; return; }
+  el.innerHTML=list.map(s=>{ const custo=servCustoTotal(s.id); return `
+    <div class="item">
+      <div class="item-top">
+        <div><div class="item-title">${esc(s.numero?s.numero+' · ':'')}${fmtDataDia(s.data)}</div>
+          <div class="item-sub">${esc(entNome(s.entidade_id))} · ${esc(tipoNome(s.tipo_servico_id)||'—')}</div></div>
+        <div style="text-align:right;display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+          ${pillEstadoServ(s.estado)}${s.complementar?'<span class="pill p-comp">Complementar</span>':''}</div>
+      </div>
+      <div class="item-meta">
+        <span><b>Saída:</b> ${fmtHora(s.hora_saida)}</span><span><b>Regresso:</b> ${fmtHora(s.hora_regresso)}</span>
+        <span><b>Destino:</b> ${esc(s.destino||'—')}</span><span><b>Passageiros:</b> ${s.num_passageiros??'—'}</span>
+        <span><b>Viaturas:</b> ${esc(servViaturasLabel(s.id))}</span>
+        <span><b>Motoristas:</b> ${esc(servMotoristasLabel(s.id))}</span>
+        ${custo?`<span><b>Custo:</b> ${fmtEur(custo)}</span>`:''}
+      </div>
+      <div class="item-actions"><button class="btn btn-ghost btn-sm" onclick="editServico('${s.id}')">Abrir</button></div>
+    </div>`;}).join('');
+}
+async function editServico(id){
+  let s = id ? await sbGet('servicos?id=eq.'+id).then(r=>r[0]) : {estado:'Em preparação',complementar:false};
+  let pontos = id ? await sbGet('pontos_recolha?select=*&servico_id=eq.'+id+'&order=ordem') : [];
+  s._viaturas = id ? await sbGet('servico_viaturas?select=*&servico_id=eq.'+id+'&order=created_at') : (s._viaturas||[]);
+  s._motoristas = id ? await sbGet('servico_motoristas?select=*&servico_id=eq.'+id+'&order=created_at') : (s._motoristas||[]);
+  openModal(servicoForm(s,pontos)); wireServicoForm(s);
+}
+let curServ=null;
+function svViatRow(vid){ return `<div class="sub-row sv-row"><select class="sv-viat" onchange="recalcServ()">${opts(cache.viaturas,vid,'id',v=>v.matricula+(v.marca?' · '+v.marca:''),'— escolher —')}</select><span class="sv-custo" style="min-width:74px;text-align:right;font-weight:600;color:var(--primary)"></span><button type="button" class="icon-btn" onclick="this.closest('.sv-row').remove();recalcServ()">×</button></div>`; }
+function svViatRows(s){ const arr=(s._viaturas&&s._viaturas.length)?s._viaturas:[{viatura_id:''}]; return arr.map(v=>svViatRow(v.viatura_id)).join(''); }
+function addSvViat(){ const w=document.createElement('div'); w.innerHTML=svViatRow(''); $('#svBox').appendChild(w.firstChild); recalcServ(); }
+function smRow(m){ return `<div class="sm-row" style="border:1px solid var(--border);border-radius:9px;padding:9px;margin-bottom:8px">
+    <div class="sub-row"><select class="sm-mot" onchange="recalcServ()" style="flex:2">${opts(cache.motoristas.filter(x=>x.estado==='Ativo'),m.motorista_id,'id',x=>x.nome,'— escolher —')}</select>
+      <input type="number" class="sm-horas" inputmode="decimal" placeholder="horas" value="${esc(m.num_horas??'')}" style="flex:1;min-width:0" oninput="recalcServ()">
+      <button type="button" class="icon-btn" onclick="this.closest('.sm-row').remove();recalcServ()">×</button></div>
+    <div class="sub-row sm-tipo-wrap" style="margin-top:6px"><select class="sm-tipo" style="flex:1"><option value="receber" ${m.compl_tipo==='receber'?'selected':''}>Receber</option><option value="banco" ${m.compl_tipo==='banco'?'selected':''}>Banco de horas</option></select><span class="sm-custo" style="min-width:80px;text-align:right;font-weight:600;color:var(--primary)"></span></div></div>`; }
+function svMotRows(s){ const arr=(s._motoristas&&s._motoristas.length)?s._motoristas:[{}]; return arr.map(smRow).join(''); }
+function addSvMot(){ const w=document.createElement('div'); w.innerHTML=smRow({}); $('#smBox').appendChild(w.firstChild); recalcServ(); }
+function recalcServ(){
+  const km=Number($('#s_km')&&$('#s_km').value)||0;
+  const ckm=$('#s_ckm')&&$('#s_ckm').checked, cmot=$('#s_cmot')&&$('#s_cmot').checked;
+  const comp=$('#s_comp')&&$('#s_comp').checked; let total=0, lot=0;
+  const pass=Number($('#s_pass')&&$('#s_pass').value)||0;
+  document.querySelectorAll('#svBox .sv-row').forEach(row=>{ const vid=row.querySelector('.sv-viat').value;
+    const v=cache.viaturas.find(x=>x.id===vid); if(v) lot+=Number(v.lotacao)||0;
+    const c=ckm?custoKmViatura(vid,km):0; row.querySelector('.sv-custo').textContent=ckm?fmtEur(c):'—'; total+=c; });
+  document.querySelectorAll('#smBox .sm-row').forEach(row=>{ const mid=row.querySelector('.sm-mot').value; const horas=Number(row.querySelector('.sm-horas').value)||0;
+    const val=Math.round(horas*valorHoraMot(mid)*100)/100;
+    if(cmot) total+=val;
+    row.querySelector('.sm-tipo-wrap').style.display=comp?'flex':'none';
+    row.querySelector('.sm-custo').textContent=''; });
+  if($('#s_lot')){ $('#s_lot').textContent=lot; $('#s_lot').style.color=(pass&&lot<pass)?'var(--danger)':'var(--ok)'; }
+  if($('#s_passv')) $('#s_passv').textContent=pass;
+  if($('#s_custo_total')) $('#s_custo_total').textContent=fmtEur(total);
+}
+function servicoForm(s,pontos){
+  return `
+  <div class="modal-head"><h3>${s.numero?'Ficha '+esc(s.numero):(s.id?'Ficha':'Nova ficha')}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+  <div class="modal-body">
+    <div class="field-row">
+      <div class="field"><label>Área</label><select id="s_area">${opts(cache.areas,s.area_id,'id',a=>a.nome,'—')}</select></div>
+      <div class="field"><label>Estado</label><select id="s_estado">${opts(EST_SERV.map(e=>({v:e})),s.estado,'v',o=>o.v)}</select></div>
+    </div>
+    <div class="field"><label>Entidade</label><select id="s_ent"></select></div>
+    <div class="field"><label>Contacto</label><select id="s_cont"></select></div>
+    <div class="field"><label>Tipo de serviço</label><select id="s_tipo"></select></div>
+    <div class="field-row">
+      <div class="field"><label>Data</label><input type="date" id="s_data" value="${esc(s.data||'')}"></div>
+      <div class="field"><label>Passageiros</label><input type="number" id="s_pass" inputmode="numeric" value="${esc(s.num_passageiros??'')}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Hora de saída</label><input type="time" id="s_saida" value="${fmtHora(s.hora_saida)==='—'?'':fmtHora(s.hora_saida)}"></div>
+      <div class="field"><label>Hora de regresso</label><input type="time" id="s_reg" value="${fmtHora(s.hora_regresso)==='—'?'':fmtHora(s.hora_regresso)}"></div>
+    </div>
+    <div class="section-label">Pontos de recolha</div>
+    <div class="sub-list" id="pontosBox">${pontosRows(pontos)}</div>
+    <button type="button" class="add-line" onclick="addPonto()">+ Adicionar ponto</button>
+    <div class="field" style="margin-top:12px"><label>Destino</label><input id="s_dest" value="${esc(s.destino||'')}"></div>
+    <div class="field"><label>Descrição do serviço</label><textarea id="s_desc">${esc(s.descricao||'')}</textarea></div>
+    <div class="divider"></div>
+    <div class="section-label">Contabilização de custos</div>
+    <div class="field"><label>Distância (km)</label><input type="number" id="s_km" inputmode="decimal" value="${esc(s.distancia_km??'')}"></div>
+    <label class="check" style="margin-bottom:8px"><input type="checkbox" id="s_ckm" ${s.contab_km?'checked':''}> Contabilizar custo de transporte (km)</label>
+    <label class="check" style="margin-bottom:8px"><input type="checkbox" id="s_cmot" ${s.contab_motorista?'checked':''}> Contabilizar custo com motorista (horas)</label>
+    <div class="section-label" style="margin-top:10px">Viaturas</div>
+    <div id="svBox">${svViatRows(s)}</div>
+    <button type="button" class="add-line" onclick="addSvViat()">+ Adicionar viatura</button>
+    <div class="item-sub" style="margin:8px 2px 0">Lotação: <b id="s_lot">0</b> / <span id="s_passv">0</span> lugares</div>
+    <div class="section-label" style="margin-top:12px">Motoristas</div>
+    <div id="smBox">${svMotRows(s)}</div>
+    <button type="button" class="add-line" onclick="addSvMot()">+ Adicionar motorista</button>
+    <div class="field" style="margin-top:12px"><label class="check"><input type="checkbox" id="s_comp" ${s.complementar?'checked':''}> Serviço complementar</label></div>
+    <div class="custo-line custo-total" style="margin-top:8px"><span>Custo total do serviço</span><b id="s_custo_total">—</b></div>
+    <div class="field" style="margin-top:12px"><label>Observações</label><textarea id="s_obs">${esc(s.observacoes||'')}</textarea></div>
+    ${s.id?`<button type="button" class="btn btn-ghost btn-block" style="margin-top:6px" onclick="verHistoricoServ('${s.id}')">Ver histórico</button>`:''}
+  </div>
+  <div class="modal-foot">
+    ${s.id?`<button class="btn btn-danger" onclick="apagarServico('${s.id}')">Apagar</button>`:''}
+    <button class="btn btn-primary" id="saveServ">Guardar</button>
+  </div>`;
+}
+function wireServicoForm(s){
+  curServ=s;
+  const fillEnt=(a,sel)=>{ $('#s_ent').innerHTML=opts(cache.entidades.filter(e=>e.area_id===a),sel,'id',e=>e.nome,'—'); };
+  const fillTipo=(a,sel)=>{ $('#s_tipo').innerHTML=opts(cache.tipos.filter(t=>t.area_id===a||t.area_id==null),sel,'id',t=>t.nome,'—'); };
+  const fillCont=(entId,sel)=>{ $('#s_cont').innerHTML=opts(cache.contactos.filter(c=>c.entidade_id===entId),sel,'id',c=>c.nome+(c.telefone?' · '+c.telefone:''),'—'); };
+  fillEnt(s.area_id,s.entidade_id); fillTipo(s.area_id,s.tipo_servico_id); fillCont(s.entidade_id,s.contacto_id);
+  $('#s_area').onchange=e=>{ fillEnt(e.target.value); fillTipo(e.target.value); $('#s_cont').innerHTML='<option value="">—</option>'; };
+  $('#s_ent').onchange=e=>fillCont(e.target.value);
+  ['s_km','s_ckm','s_cmot','s_pass','s_comp'].forEach(id=>{ const el=$('#'+id); if(el){ el.addEventListener('input',recalcServ); el.addEventListener('change',recalcServ); } });
+  recalcServ();
+  $('#saveServ').onclick=()=>saveServico(s);
+}
+async function saveServico(s){
+  const body={
+    area_id:$('#s_area').value||null, entidade_id:$('#s_ent').value||null, contacto_id:$('#s_cont').value||null,
+    tipo_servico_id:$('#s_tipo').value||null, data:$('#s_data').value||null,
+    num_passageiros:$('#s_pass').value?Number($('#s_pass').value):null,
+    hora_saida:$('#s_saida').value||null, hora_regresso:$('#s_reg').value||null,
+    destino:$('#s_dest').value.trim()||null, descricao:$('#s_desc').value.trim()||null,
+    complementar:$('#s_comp').checked, estado:$('#s_estado').value, observacoes:$('#s_obs').value.trim()||null,
+    distancia_km:$('#s_km').value?Number($('#s_km').value):null, contab_km:$('#s_ckm').checked, contab_motorista:$('#s_cmot').checked
+  };
+  if(!body.entidade_id||!body.data){ toast('Entidade e data são obrigatórias',true); return; }
+  const viats=[...new Set([...document.querySelectorAll('#svBox .sv-viat')].map(x=>x.value).filter(Boolean))];
+  const mots=[...document.querySelectorAll('#smBox .sm-row')].map(row=>({
+    motorista_id:row.querySelector('.sm-mot').value||null,
+    num_horas:row.querySelector('.sm-horas').value?Number(row.querySelector('.sm-horas').value):null,
+    compl_tipo:body.complementar?row.querySelector('.sm-tipo').value:null
+  })).filter(m=>m.motorista_id);
+  $('#saveServ').disabled=true;
+  try{
+    const pontos=collectPontos();
+    let sid=s.id; const estadoAntigo=s.estado;
+    if(s.id){ await sbUpdate('servicos',s.id,body);
+      if(estadoAntigo!==body.estado) await logHist('servico',s.id,null,'Estado alterado para '+body.estado); }
+    else { const nv=await sbInsert('servicos',body); sid=nv.id; await logHist('servico',sid,null,'Ficha criada'); }
+    await sbDelete('pontos_recolha','servico_id=eq.'+sid);
+    for(let i=0;i<pontos.length;i++) await sbInsert('pontos_recolha',{servico_id:sid,local:pontos[i],ordem:i});
+    await sbDelete('servico_viaturas','servico_id=eq.'+sid);
+    for(const vid of viats){ const c=body.contab_km?custoKmViatura(vid,body.distancia_km):null; await sbInsert('servico_viaturas',{servico_id:sid,viatura_id:vid,custo_km:c}); }
+    await sbDelete('servico_motoristas','servico_id=eq.'+sid);
+    for(const m of mots){ const c=body.contab_motorista?Math.round((Number(m.num_horas)||0)*valorHoraMot(m.motorista_id)*100)/100:null; await sbInsert('servico_motoristas',{servico_id:sid,motorista_id:m.motorista_id,num_horas:m.num_horas,compl_tipo:m.compl_tipo,custo_motorista:c}); }
+    toast('Ficha guardada');
+    closeModal(); if(current==='servicos') viewServicos();
+  }catch(e){ toast(e.message,true); $('#saveServ').disabled=false; }
+}
+async function verHistoricoServ(id){
+  const h=await sbGet('historico?select=*&entidade_tipo=eq.servico&entidade_id=eq.'+id+'&order=created_at.asc');
+  openModal(`
+    <div class="modal-head"><h3>Histórico</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      ${h.length?`<ul class="timeline">${h.map(x=>`<li><div>${esc(x.descricao)}</div><div class="t">${new Date(x.created_at).toLocaleString('pt-PT')}</div></li>`).join('')}</ul>`:'<div class="empty">Sem registos.</div>'}
+    </div>
+    <div class="modal-foot"><button class="btn btn-primary" onclick="editServico('${id}')">Voltar</button></div>`);
+}
+function apagarServico(id){ confirmar('Apagar este serviço?', async()=>{
+  await sbDelete('servicos','id=eq.'+id); closeModal(); toast('Serviço apagado'); viewServicos(); }, true); }
+
+/* =========================================================
+   ENTIDADES + CONTACTOS
+========================================================= */
+let entFiltro={q:'',area:''};
+async function viewEntidades(){
+  $('#view').innerHTML=`
+    <div class="view-head"><h2>Entidades</h2><button class="btn btn-primary" onclick="editEntidade()">+ Nova</button></div>
+    <div class="toolbar">
+      <input class="search" id="eq" placeholder="Pesquisar entidade…" value="${esc(entFiltro.q)}">
+      <select id="ear">${opts(cache.areas,entFiltro.area,'id',a=>a.nome,'Todas as áreas')}</select>
+    </div>
+    <div id="entList" class="list"></div>`;
+  $('#eq').oninput=e=>{entFiltro.q=e.target.value;renderEntList();};
+  $('#ear').onchange=e=>{entFiltro.area=e.target.value;renderEntList();};
+  renderEntList();
+}
+function renderEntList(){
+  const q=entFiltro.q.toLowerCase();
+  let list=cache.entidades.filter(e=>{
+    if(entFiltro.area && e.area_id!==entFiltro.area) return false;
+    if(q && !e.nome.toLowerCase().includes(q)) return false; return true;
+  });
+  const el=$('#entList');
+  if(!list.length){ el.innerHTML=`<div class="empty"><b>Sem entidades</b>Adiciona a primeira entidade requerente.</div>`; return; }
+  el.innerHTML=list.map(e=>{
+    const nc=cache.contactos.filter(c=>c.entidade_id===e.id).length;
+    return `<div class="item">
+      <div class="item-top"><div><div class="item-title">${esc(e.nome)}</div>
+        <div class="item-sub">${esc(areaNome(e.area_id))}</div></div>
+        ${e.ativo===false?'<span class="pill p-off">Inativa</span>':''}</div>
+      <div class="item-meta"><span><b>Contactos:</b> ${nc}</span></div>
+      <div class="item-actions"><button class="btn btn-ghost btn-sm" onclick="editEntidade('${e.id}')">Abrir</button></div>
+    </div>`;
+  }).join('');
+}
+async function editEntidade(id){
+  const e = id ? cache.entidades.find(x=>x.id===id) : {ativo:true};
+  const contactos = id ? cache.contactos.filter(c=>c.entidade_id===id) : [];
+  openModal(`
+    <div class="modal-head"><h3>${id?'Entidade':'Nova entidade'}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Área</label><select id="e_area">${opts(cache.areas,e.area_id,'id',a=>a.nome,'—')}</select></div>
+      <div class="field"><label>Nome da entidade</label><input id="e_nome" value="${esc(e.nome||'')}"></div>
+      <div class="field"><label>Observações</label><textarea id="e_obs">${esc(e.observacoes||'')}</textarea></div>
+      <label class="check"><input type="checkbox" id="e_ativo" ${e.ativo!==false?'checked':''}> Ativa</label>
+      ${id?`<div class="divider"></div><div class="section-label">Contactos</div>
+        <div id="contBox" class="sub-list">${contactos.map(c=>contRow(c)).join('')||'<div class="item-sub">Sem contactos.</div>'}</div>
+        <button type="button" class="add-line" style="margin-top:8px" onclick="novoContacto('${id}')">+ Adicionar contacto</button>`:'<div class="item-sub" style="margin-top:8px">Guarda a entidade para adicionar contactos.</div>'}
+    </div>
+    <div class="modal-foot">
+      ${id?`<button class="btn btn-danger" onclick="apagarEntidade('${id}')">Apagar</button>`:''}
+      <button class="btn btn-primary" id="saveEnt">Guardar</button>
+    </div>`);
+  $('#saveEnt').onclick=()=>saveEntidade(e);
+}
+function contRow(c){
+  return `<div class="item" style="padding:10px 11px" data-cid="${c.id}">
+    <div class="item-top"><div><div class="item-title" style="font-size:14px">${esc(c.nome||'(sem nome)')}${c.principal?' · principal':''}</div>
+      <div class="item-sub">${esc(c.telefone||'')}${c.email?' · '+esc(c.email):''}${c.funcao?' · '+esc(c.funcao):''}</div></div>
+      <button class="btn btn-ghost btn-sm" onclick="editContacto('${c.id}')">Editar</button></div></div>`;
+}
+async function saveEntidade(e){
+  const body={ area_id:$('#e_area').value||null, nome:$('#e_nome').value.trim(),
+    observacoes:$('#e_obs').value.trim()||null, ativo:$('#e_ativo').checked };
+  if(!body.area_id||!body.nome){ toast('Área e nome são obrigatórios',true); return; }
+  $('#saveEnt').disabled=true;
+  try{ if(e.id) await sbUpdate('entidades',e.id,body); else await sbInsert('entidades',body);
+    await loadCaches(); closeModal(); toast('Entidade guardada'); if(current==='entidades') viewEntidades();
+  }catch(err){ toast(err.message,true); $('#saveEnt').disabled=false; }
+}
+function apagarEntidade(id){ confirmar('Apagar esta entidade e os seus contactos?', async()=>{
+  await sbDelete('entidades','id=eq.'+id); await loadCaches(); closeModal(); toast('Entidade apagada'); viewEntidades(); }, true); }
+
+function novoContacto(entId){ editContacto(null, entId); }
+async function editContacto(id, entId){
+  const c = id ? cache.contactos.find(x=>x.id===id) : {entidade_id:entId,principal:false,ativo:true};
+  openModal(`
+    <div class="modal-head"><h3>${id?'Contacto':'Novo contacto'}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Nome</label><input id="c_nome" value="${esc(c.nome||'')}"></div>
+      <div class="field-row">
+        <div class="field"><label>Telefone</label><input id="c_tel" inputmode="tel" value="${esc(c.telefone||'')}"></div>
+        <div class="field"><label>Função</label><input id="c_func" value="${esc(c.funcao||'')}"></div>
+      </div>
+      <div class="field"><label>Email</label><input id="c_email" inputmode="email" value="${esc(c.email||'')}"></div>
+      <label class="check"><input type="checkbox" id="c_princ" ${c.principal?'checked':''}> Contacto principal</label>
+    </div>
+    <div class="modal-foot">
+      ${id?`<button class="btn btn-danger" onclick="apagarContacto('${id}','${c.entidade_id}')">Apagar</button>`:''}
+      <button class="btn btn-primary" id="saveCont">Guardar</button>
+    </div>`);
+  $('#saveCont').onclick=async()=>{
+    const body={ entidade_id:c.entidade_id, nome:$('#c_nome').value.trim()||null, telefone:$('#c_tel').value.trim()||null,
+      email:$('#c_email').value.trim()||null, funcao:$('#c_func').value.trim()||null, principal:$('#c_princ').checked };
+    if(!body.nome && !body.telefone){ toast('Indica pelo menos nome ou telefone',true); return; }
+    $('#saveCont').disabled=true;
+    try{ if(id) await sbUpdate('contactos_entidades',id,body); else await sbInsert('contactos_entidades',body);
+      await loadCaches(); editEntidade(c.entidade_id); toast('Contacto guardado');
+    }catch(err){ toast(err.message,true); $('#saveCont').disabled=false; }
+  };
+}
+function apagarContacto(id, entId){ confirmar('Apagar este contacto?', async()=>{
+  await sbDelete('contactos_entidades','id=eq.'+id); await loadCaches(); editEntidade(entId); toast('Contacto apagado'); }, true); }
+
+/* =========================================================
+   MOTORISTAS
+========================================================= */
+async function viewMotoristas(){
+  const list=cache.motoristas;
+  $('#view').innerHTML=`
+    <div class="view-head"><h2>Motoristas</h2><button class="btn btn-primary" onclick="editMotorista()">+ Novo</button></div>
+    <div class="list">${list.length?list.map(m=>`
+      <div class="item"><div class="item-top">
+        <div><div class="item-title">${esc(m.nome)}</div><div class="item-sub">${esc(m.telefone||'—')}</div></div>
+        <span class="pill ${m.estado==='Ativo'?'p-disp':'p-off'}">${esc(m.estado)}</span></div>
+      <div class="item-meta">
+        <span><b>Viatura habitual:</b> ${esc(viatLabel(m.viatura_habitual_id)||'—')}</span>
+        <span><b>Valor/hora:</b> ${fmtEur(m.valor_hora)}</span></div>
+      <div class="item-actions"><button class="btn btn-ghost btn-sm" onclick="editMotorista('${m.id}')">Abrir</button></div></div>`).join('')
+      :`<div class="empty"><b>Sem motoristas</b>Adiciona o primeiro motorista.</div>`}</div>`;
+}
+async function editMotorista(id){
+  const m = id ? cache.motoristas.find(x=>x.id===id) : {estado:'Ativo'};
+  openModal(`
+    <div class="modal-head"><h3>${id?'Motorista':'Novo motorista'}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Nome</label><input id="m_nome" value="${esc(m.nome||'')}"></div>
+      <div class="field-row">
+        <div class="field"><label>Telefone</label><input id="m_tel" inputmode="tel" value="${esc(m.telefone||'')}"></div>
+        <div class="field"><label>Estado</label><select id="m_estado">${opts(['Ativo','Inativo'].map(v=>({v})),m.estado,'v',o=>o.v)}</select></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Viatura habitual</label><select id="m_viat">${opts(cache.viaturas,m.viatura_habitual_id,'id',v=>v.matricula+(v.marca?' · '+v.marca:''),'—')}</select></div>
+        <div class="field"><label>Valor/hora (€)</label><input type="number" id="m_vh" inputmode="decimal" value="${esc(m.valor_hora??'')}"></div>
+      </div>
+      <div class="field"><label>Observações</label><textarea id="m_obs">${esc(m.observacoes||'')}</textarea></div>
+    </div>
+    <div class="modal-foot">
+      ${id?`<button class="btn btn-danger" onclick="apagarMotorista('${id}')">Apagar</button>`:''}
+      <button class="btn btn-primary" id="saveMot">Guardar</button>
+    </div>`);
+  $('#saveMot').onclick=async()=>{
+    const body={ nome:$('#m_nome').value.trim(), telefone:$('#m_tel').value.trim()||null, estado:$('#m_estado').value,
+      viatura_habitual_id:$('#m_viat').value||null, valor_hora:$('#m_vh').value?Number($('#m_vh').value):null,
+      observacoes:$('#m_obs').value.trim()||null };
+    if(!body.nome){ toast('O nome é obrigatório',true); return; }
+    $('#saveMot').disabled=true;
+    try{ if(id) await sbUpdate('motoristas',id,body); else await sbInsert('motoristas',body);
+      await loadCaches(); closeModal(); toast('Motorista guardado'); viewMotoristas();
+    }catch(e){ toast(e.message,true); $('#saveMot').disabled=false; }
+  };
+}
+function apagarMotorista(id){ confirmar('Apagar este motorista?', async()=>{
+  await sbDelete('motoristas','id=eq.'+id); await loadCaches(); closeModal(); toast('Motorista apagado'); viewMotoristas(); }, true); }
+
+/* =========================================================
+   VIATURAS + TAXAS
+========================================================= */
+async function viewViaturas(){
+  const list=cache.viaturas;
+  $('#view').innerHTML=`
+    <div class="view-head"><h2>Viaturas</h2><button class="btn btn-primary" onclick="editViatura()">+ Nova</button></div>
+    <div class="list">${list.length?list.map(v=>`
+      <div class="item"><div class="item-top">
+        <div><div class="item-title">${esc(v.matricula)}</div><div class="item-sub">${esc([v.marca,v.modelo].filter(Boolean).join(' '))||'—'}</div></div>
+        <span class="pill ${v.estado==='Disponível'?'p-disp':v.estado==='Manutenção'?'p-manut':'p-indisp'}">${esc(v.estado)}</span></div>
+      <div class="item-meta"><span><b>Lotação:</b> ${v.lotacao??'—'}</span></div>
+      <div class="item-actions"><button class="btn btn-ghost btn-sm" onclick="editViatura('${v.id}')">Abrir</button></div></div>`).join('')
+      :`<div class="empty"><b>Sem viaturas</b>Adiciona a primeira viatura.</div>`}</div>`;
+}
+const EST_VIAT=['Disponível','Indisponível','Manutenção'];
+async function editViatura(id){
+  const v = id ? cache.viaturas.find(x=>x.id===id) : {estado:'Disponível'};
+  const taxas = id ? await sbGet('taxas_viatura?select=*&viatura_id=eq.'+id+'&order=km_de') : [];
+  openModal(`
+    <div class="modal-head"><h3>${id?'Viatura':'Nova viatura'}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="field-row">
+        <div class="field"><label>Matrícula</label><input id="v_mat" value="${esc(v.matricula||'')}"></div>
+        <div class="field"><label>Estado</label><select id="v_estado">${opts(EST_VIAT.map(x=>({x})),v.estado,'x',o=>o.x)}</select></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Marca</label><input id="v_marca" value="${esc(v.marca||'')}"></div>
+        <div class="field"><label>Modelo</label><input id="v_modelo" value="${esc(v.modelo||'')}"></div>
+      </div>
+      <div class="field"><label>Lotação</label><input type="number" id="v_lot" inputmode="numeric" value="${esc(v.lotacao??'')}"></div>
+      <div class="field"><label>Observações</label><textarea id="v_obs">${esc(v.observacoes||'')}</textarea></div>
+      ${id?`<div class="divider"></div>
+        <div class="section-label">Escalões de km (custo por km)</div>
+        <div class="item-sub" style="margin-bottom:8px">Cálculo marginal: cada faixa paga a sua taxa só nos km respetivos.</div>
+        <div id="taxBox" class="sub-list">${taxas.map(t=>taxRow(t)).join('')}</div>
+        <button type="button" class="add-line" style="margin-top:8px" onclick="addTax()">+ Adicionar escalão</button>`
+      :'<div class="item-sub" style="margin-top:8px">Guarda a viatura para definir os escalões de km.</div>'}
+    </div>
+    <div class="modal-foot">
+      ${id?`<button class="btn btn-danger" onclick="apagarViatura('${id}')">Apagar</button>`:''}
+      <button class="btn btn-primary" id="saveViat">Guardar</button>
+    </div>`);
+  $('#saveViat').onclick=()=>saveViatura(v, taxas);
+}
+function taxRow(t){
+  return `<div class="sub-row tax-row">
+    <input type="number" class="tx-de" inputmode="numeric" placeholder="de km" value="${esc(t.km_de??0)}" style="flex:1">
+    <input type="number" class="tx-ate" inputmode="numeric" placeholder="até (vazio=∞)" value="${esc(t.km_ate??'')}" style="flex:1">
+    <input type="number" class="tx-val" inputmode="decimal" placeholder="€/km" value="${esc(t.valor_km??'')}" style="flex:1">
+    <button type="button" class="icon-btn" onclick="this.parentNode.remove()">×</button></div>`;
+}
+function addTax(){ const b=$('#taxBox'); const d=document.createElement('div'); d.className='sub-row tax-row';
+  d.innerHTML=`<input type="number" class="tx-de" inputmode="numeric" placeholder="de km" value="0" style="flex:1">
+    <input type="number" class="tx-ate" inputmode="numeric" placeholder="até (vazio=∞)" style="flex:1">
+    <input type="number" class="tx-val" inputmode="decimal" placeholder="€/km" style="flex:1">
+    <button type="button" class="icon-btn" onclick="this.parentNode.remove()">×</button>`;
+  b.appendChild(d); }
+async function saveViatura(v){
+  const body={ matricula:$('#v_mat').value.trim(), marca:$('#v_marca').value.trim()||null, modelo:$('#v_modelo').value.trim()||null,
+    lotacao:$('#v_lot').value?Number($('#v_lot').value):null, estado:$('#v_estado').value, observacoes:$('#v_obs').value.trim()||null };
+  if(!body.matricula){ toast('A matrícula é obrigatória',true); return; }
+  $('#saveViat').disabled=true;
+  try{
+    let vid=v.id;
+    if(vid) await sbUpdate('viaturas',vid,body); else { const nv=await sbInsert('viaturas',body); vid=nv.id; }
+    if(v.id){
+      await sbDelete('taxas_viatura','viatura_id=eq.'+vid);
+      const rows=[...document.querySelectorAll('#taxBox .tax-row')];
+      for(const r of rows){
+        const de=r.querySelector('.tx-de').value, ate=r.querySelector('.tx-ate').value, val=r.querySelector('.tx-val').value;
+        if(val==='') continue;
+        await sbInsert('taxas_viatura',{viatura_id:vid, km_de:de?Number(de):0, km_ate:ate?Number(ate):null, valor_km:Number(val)});
+      }
+    }
+    await loadCaches(); closeModal(); toast('Viatura guardada'); viewViaturas();
+  }catch(e){ toast(e.message,true); $('#saveViat').disabled=false; }
+}
+function apagarViatura(id){ confirmar('Apagar esta viatura?', async()=>{
+  await sbDelete('viaturas','id=eq.'+id); await loadCaches(); closeModal(); toast('Viatura apagada'); viewViaturas(); }, true); }
+
+/* =========================================================
+   TIPOS DE SERVIÇO
+========================================================= */
+async function viewTipos(){
+  $('#view').innerHTML=`
+    <div class="view-head"><h2>Tipos de serviço</h2><button class="btn btn-primary" onclick="editTipo()">+ Novo</button></div>
+    ${cache.areas.map(a=>{
+      const ts=cache.tipos.filter(t=>t.area_id===a.id);
+      return `<div class="dash-group"><h3>${esc(a.nome).toUpperCase()}</h3><div class="list">
+        ${ts.length?ts.map(t=>`<div class="item" style="padding:11px 12px"><div class="item-top">
+          <div class="item-title" style="font-size:14px">${esc(t.nome)}</div>
+          <div style="display:flex;gap:6px;align-items:center">${t.ativo===false?'<span class="pill p-off">Inativo</span>':''}
+            <button class="btn btn-ghost btn-sm" onclick="editTipo('${t.id}')">Editar</button></div></div></div>`).join('')
+          :'<div class="item-sub">Sem tipos nesta área.</div>'}
+      </div></div>`;
+    }).join('')}
+    ${cache.tipos.some(t=>t.area_id==null)?`<div class="dash-group"><h3>TODAS AS ÁREAS</h3><div class="list">
+      ${cache.tipos.filter(t=>t.area_id==null).map(t=>`<div class="item" style="padding:11px 12px"><div class="item-top">
+        <div class="item-title" style="font-size:14px">${esc(t.nome)}</div>
+        <button class="btn btn-ghost btn-sm" onclick="editTipo('${t.id}')">Editar</button></div></div>`).join('')}</div></div>`:''}`;
+}
+async function editTipo(id){
+  const t = id ? cache.tipos.find(x=>x.id===id) : {ativo:true,ordem:0};
+  openModal(`
+    <div class="modal-head"><h3>${id?'Tipo de serviço':'Novo tipo'}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">
+      <div class="field"><label>Área</label><select id="t_area"><option value="">Todas as áreas</option>${opts(cache.areas,t.area_id,'id',a=>a.nome)}</select></div>
+      <div class="field"><label>Nome</label><input id="t_nome" value="${esc(t.nome||'')}"></div>
+      <div class="field"><label>Ordem</label><input type="number" id="t_ordem" inputmode="numeric" value="${esc(t.ordem??0)}"></div>
+      <label class="check"><input type="checkbox" id="t_ativo" ${t.ativo!==false?'checked':''}> Ativo</label>
+    </div>
+    <div class="modal-foot">
+      ${id?`<button class="btn btn-danger" onclick="apagarTipo('${id}')">Apagar</button>`:''}
+      <button class="btn btn-primary" id="saveTipo">Guardar</button>
+    </div>`);
+  $('#saveTipo').onclick=async()=>{
+    const body={ area_id:$('#t_area').value||null, nome:$('#t_nome').value.trim(),
+      ordem:$('#t_ordem').value?Number($('#t_ordem').value):0, ativo:$('#t_ativo').checked };
+    if(!body.nome){ toast('O nome é obrigatório',true); return; }
+    $('#saveTipo').disabled=true;
+    try{ if(id) await sbUpdate('tipos_servico',id,body); else await sbInsert('tipos_servico',body);
+      await loadCaches(); closeModal(); toast('Tipo guardado'); viewTipos();
+    }catch(e){ toast(e.message,true); $('#saveTipo').disabled=false; }
+  };
+}
+function apagarTipo(id){ confirmar('Apagar este tipo de serviço?', async()=>{
+  await sbDelete('tipos_servico','id=eq.'+id); await loadCaches(); closeModal(); toast('Tipo apagado'); viewTipos(); }, true); }
+
+/* =========================================================
+   Cálculo de custos (complementares)
+========================================================= */
+function horasEntre(hi, hf){
+  if(!hi||!hf) return 0;
+  const [h1,m1]=String(hi).slice(0,5).split(':').map(Number);
+  const [h2,m2]=String(hf).slice(0,5).split(':').map(Number);
+  let mins=(h2*60+m2)-(h1*60+m1); if(mins<0) mins+=1440;
+  return Math.round(mins/60*100)/100;
+}
+function custoKm(distancia, taxas){
+  const d=Number(distancia||0); if(!d||!taxas||!taxas.length) return 0;
+  const ts=taxas.slice().sort((a,b)=>((a.km_ate==null?Infinity:a.km_ate)-(b.km_ate==null?Infinity:b.km_ate)));
+  let prev=0, cost=0;
+  for(const t of ts){
+    const top=(t.km_ate==null?Infinity:Number(t.km_ate));
+    const upper=Math.min(d, top);
+    const km=upper-prev;
+    if(km>0) cost+=km*Number(t.valor_km||0);
+    prev=top; if(d<=top) break;
+  }
+  return Math.round(cost*100)/100;
+}
+function custoKmViatura(viaturaId, distancia){ return custoKm(distancia, cache.taxas.filter(t=>t.viatura_id===viaturaId)); }
+function valorHoraMot(motId){ const m=cache.motoristas.find(x=>x.id===motId); return Number((m&&m.valor_hora)||0); }
+async function fetchSV(ids){ if(!ids||!ids.length) return []; return sbGet('servico_viaturas?select=*&servico_id=in.('+ids.join(',')+')&order=created_at'); }
+async function fetchSM(ids){ if(!ids||!ids.length) return []; return sbGet('servico_motoristas?select=*&servico_id=in.('+ids.join(',')+')&order=created_at'); }
+function groupBy(arr,key){ const m={}; arr.forEach(x=>{ (m[x[key]]=m[x[key]]||[]).push(x); }); return m; }
+
+/* =========================================================
+   ESCALAS SEMANAIS + FOLHA DO MOTORISTA
+========================================================= */
+function weekOf(iso){ const d=new Date(iso+'T00:00:00'); const dow=(d.getDay()+6)%7; d.setDate(d.getDate()-dow);
+  const f=x=>x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
+  const fim=new Date(d); fim.setDate(d.getDate()+6); return {ini:f(d),fim:f(fim)}; }
+function shiftWeek(iniISO, days){ const d=new Date(iniISO+'T00:00:00'); d.setDate(d.getDate()+days); return weekOf(
+  d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')); }
+
+let escSemana=null, escServicos=[], escPontos={}, escSV={}, escSM=[];
+async function viewEscalas(){
+  if(!escSemana) escSemana=weekRange();
+  await loadEscData(); renderEscView();
+}
+async function loadEscData(){
+  escServicos=await sbGet('servicos?select=*&data=gte.'+escSemana.ini+'&data=lte.'+escSemana.fim+'&estado=in.(Validado,Realizado)&order=data,hora_saida');
+  escPontos={}; escSV={}; escSM=[];
+  const ids=escServicos.map(s=>s.id);
+  if(ids.length){
+    const pts=await sbGet('pontos_recolha?select=servico_id,local,ordem&servico_id=in.('+ids.join(',')+')&order=ordem');
+    pts.forEach(p=>{ (escPontos[p.servico_id]=escPontos[p.servico_id]||[]).push(p.local); });
+    escSV=groupBy(await fetchSV(ids),'servico_id');
+    escSM=await fetchSM(ids);
+  }
+}
+function escServsDoMot(motId){ const set=new Set(escSM.filter(x=>x.motorista_id===motId).map(x=>x.servico_id)); return escServicos.filter(s=>set.has(s.id)); }
+function escViatServ(id){ return [...new Set((escSV[id]||[]).map(v=>v.viatura_id))].map(viatLabel).filter(Boolean).join(', ')||'—'; }
+function renderEscView(){
+  const motsIds=[...new Set(escSM.map(x=>x.motorista_id).filter(Boolean))];
+  const comServ=new Set(escSM.map(x=>x.servico_id));
+  const semAtrib=escServicos.filter(s=>!comServ.has(s.id));
+  const linhas=motsIds.sort((a,b)=>motNome(a).localeCompare(motNome(b))).map(mid=>{
+    const arr=escServsDoMot(mid); const norm=arr.filter(s=>!s.complementar).length; const comp=arr.filter(s=>s.complementar).length;
+    const viat=[...new Set(arr.flatMap(s=>(escSV[s.id]||[]).map(v=>v.viatura_id)))].map(viatLabel).filter(Boolean).join(', ')||'—';
+    return `<div class="item"><div class="item-top">
+      <div><div class="item-title">${esc(motNome(mid))}</div><div class="item-sub">${esc(viat)}</div></div>
+      <button class="btn btn-primary btn-sm" onclick="abrirFolha('${mid}')">Folha</button></div>
+      <div class="item-meta"><span><b>Serviços:</b> ${norm}</span><span><b>Complementares:</b> ${comp}</span></div></div>`;
+  }).join('');
+  $('#view').innerHTML=`
+    <div class="view-head"><h2>Escalas</h2><button class="btn btn-ghost btn-sm" onclick="imprimirTodas()">Imprimir todas</button></div>
+    <div class="toolbar" style="align-items:center">
+      <button class="btn btn-ghost btn-sm" onclick="mudarSemana(-7)">◀ Anterior</button>
+      <input type="date" id="escDate" value="${escSemana.ini}">
+      <button class="btn btn-ghost btn-sm" onclick="mudarSemana(7)">Próxima ▶</button>
+    </div>
+    <div class="item-sub" style="margin:-4px 2px 12px">Semana de ${fmtData(escSemana.ini)} a ${fmtData(escSemana.fim)}</div>
+    <div class="list">${linhas||'<div class="empty"><b>Sem motoristas atribuídos</b>Atribui motoristas aos serviços desta semana na secção Serviços.</div>'}
+      ${semAtrib.length?`<div class="item" style="border-style:dashed"><div class="item-title">Por atribuir</div>
+        <div class="item-meta"><span>${semAtrib.length} serviço(s) sem motorista nesta semana</span></div></div>`:''}</div>`;
+  $('#escDate').onchange=e=>{ escSemana=weekOf(e.target.value); loadEscData().then(renderEscView); };
+}
+function mudarSemana(d){ escSemana=shiftWeek(escSemana.ini,d); loadEscData().then(renderEscView); }
+
+function diasSemana(sem){ const out=[]; const d=new Date(sem.ini+'T00:00:00');
+  for(let i=0;i<7;i++){ out.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')); d.setDate(d.getDate()+1); } return out; }
+function escalaSheetHTML(mot, servicos){
+  const norm=servicos.filter(s=>!s.complementar);
+  const comp=servicos.filter(s=>s.complementar).sort(ordServ);
+  const viaturas=[...new Set(servicos.flatMap(s=>(escSV[s.id]||[]).map(v=>v.viatura_id)))].map(viatLabel).filter(Boolean).join(', ')||'—';
+  const linhas=s=>`<table class="esc-tab"><tbody>
+        <tr><th>Tipo de serviço</th><td>${esc(tipoNome(s.tipo_servico_id)||'—')}</td></tr>
+        <tr><th>Viatura(s)</th><td>${esc(escViatServ(s.id))}</td></tr>
+        ${s.descricao?`<tr><th>Descrição</th><td>${esc(s.descricao)}</td></tr>`:''}
+        <tr><th>Pontos de recolha</th><td>${(escPontos[s.id]||[]).map(esc).join('; ')||'—'}</td></tr>
+        <tr><th>Destino</th><td>${esc(s.destino||'—')}</td></tr>
+        <tr><th>Passageiros</th><td>${s.num_passageiros??'—'}</td></tr>
+        ${s.observacoes?`<tr><th>Observações</th><td>${esc(s.observacoes)}</td></tr>`:''}
+      </tbody></table>`;
+  const bloco=s=>`<div class="esc-serv"><div class="esc-serv-h">${fmtHora(s.hora_saida)}–${fmtHora(s.hora_regresso)} · ${esc(entNome(s.entidade_id))}</div>${linhas(s)}</div>`;
+  const cbloco=s=>`<div class="esc-serv"><div class="esc-serv-h">${esc(fmtDataDia(s.data))} · ${fmtHora(s.hora_saida)}–${fmtHora(s.hora_regresso)} · ${esc(entNome(s.entidade_id))}</div>${linhas(s)}</div>`;
+  const dias=diasSemana(escSemana).map(iso=>{
+    const dow=new Date(iso+'T00:00:00').getDay();
+    const svs=norm.filter(s=>s.data===iso).sort(ordServ);
+    return `<div class="esc-day"><div class="esc-day-h">${DIAS[dow]}, ${fmtData(iso)}</div>${svs.length?svs.map(bloco).join(''):'<div class="esc-empty">Sem serviços</div>'}</div>`;
+  }).join('');
+  return `<div class="esc-page">
+    <div class="esc-head">
+      <div class="esc-org">Município de Cabeceiras de Basto · Divisão de Desenvolvimento Social</div>
+      <div class="esc-title">Escala semanal</div>
+      <div class="esc-meta">Semana de ${fmtData(escSemana.ini)} a ${fmtData(escSemana.fim)}</div>
+      <div class="esc-meta"><b>Motorista:</b> ${esc(mot.nome)} &nbsp;·&nbsp; <b>Viatura:</b> ${esc(viaturas)}</div>
+    </div>
+    <div class="esc-section">Serviços</div>
+    ${dias}
+    ${comp.length?`<div class="esc-section esc-section-c">Serviços complementares</div>${comp.map(cbloco).join('')}`:''}
+  </div>`;
+}
+function ordServ(a,b){ return (a.data||'').localeCompare(b.data||'') || String(a.hora_saida||'').localeCompare(String(b.hora_saida||'')); }
+function abrirFolha(motId){
+  const mot=cache.motoristas.find(m=>m.id===motId); const servs=escServsDoMot(motId);
+  openModal(`
+    <div class="modal-head"><h3>Folha · ${esc(mot.nome)}</h3><button class="modal-x" onclick="closeModal()">×</button></div>
+    <div class="modal-body">${escalaSheetHTML(mot,servs)}</div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeModal()">Fechar</button>
+      <button class="btn btn-primary" onclick="imprimirUma('${motId}')">Imprimir / PDF</button>
+    </div>`);
+}
+const ESC_CSS = `
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#111;margin:0;padding:16px;font-size:13px}
+  .esc-page+.esc-page{page-break-before:always}
+  .esc-head{border-bottom:2px solid #111;padding-bottom:8px;margin-bottom:12px}
+  .esc-org{font-size:12px;color:#333}
+  .esc-title{font-size:20px;font-weight:700;margin-top:2px}
+  .esc-meta{font-size:13px;margin-top:2px}
+  .esc-section{background:#15486b;color:#fff;padding:5px 10px;font-weight:700;border-radius:5px;margin:14px 0 8px;font-size:13px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .esc-section-c{background:#6b3fa0}
+  .esc-serv{border:1px solid #ccc;border-radius:6px;padding:8px 10px;margin-bottom:8px;page-break-inside:avoid}
+  .esc-serv-h{font-weight:700;margin-bottom:5px;font-size:13.5px}
+  .esc-tab{width:100%;border-collapse:collapse}
+  .esc-tab th{text-align:left;width:128px;color:#555;font-weight:600;vertical-align:top;padding:2px 8px 2px 0;font-size:12.5px}
+  .esc-tab td{padding:2px 0;font-size:12.5px}
+  .esc-day{margin-bottom:4px}
+  .esc-day-h{font-weight:700;background:#eef2f6;color:#15486b;padding:5px 9px;border-radius:5px;margin:10px 0 6px;font-size:13px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .esc-empty{color:#777;font-style:italic}
+  @page{margin:14mm}
+`;
+function imprimirDoc(bodyHTML, css){
+  const iframe=document.createElement('iframe');
+  iframe.setAttribute('aria-hidden','true');
+  iframe.style.cssText='position:fixed;left:-10000px;top:0;width:794px;height:1123px;border:0;';
+  document.body.appendChild(iframe);
+  const doc=iframe.contentWindow.document;
+  doc.open();
+  doc.write('<!DOCTYPE html><html lang="pt"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Documento</title><style>'+css+'</style></head><body>'+bodyHTML+'<script>window.onload=function(){setTimeout(function(){try{window.focus();}catch(e){}window.print();},350);};<\/script></body></html>');
+  doc.close();
+  setTimeout(function(){ try{ iframe.remove(); }catch(e){} }, 120000);
+}
+function imprimir(html){ imprimirDoc(html, ESC_CSS); }
+function imprimirUma(motId){ const mot=cache.motoristas.find(m=>m.id===motId);
+  imprimir(escalaSheetHTML(mot, escServsDoMot(motId))); }
+function imprimirTodas(){
+  const ids=[...new Set(escSM.map(x=>x.motorista_id).filter(Boolean))].sort((a,b)=>motNome(a).localeCompare(motNome(b)));
+  if(!ids.length){ toast('Sem motoristas atribuídos nesta semana',true); return; }
+  imprimir(ids.map(mid=>escalaSheetHTML(cache.motoristas.find(m=>m.id===mid), escServsDoMot(mid))).join(''));
+}
+
+/* =========================================================
+   RELATÓRIOS
+========================================================= */
+let relTipoRel='geral', relModo='mes', relMes=null, relSemana=null, relDe=null, relAte=null, relArea='', relMotId='', relResult=null;
+const PAL=['#15486b','#2e7d5b','#b26a00','#6b3fa0','#1f5f8b','#b3261e','#5b6b7b','#0f766e','#9333ea','#c2410c'];
+function clip(s,n){ s=String(s||''); return s.length>n?s.slice(0,n-1)+'…':s; }
+function statusColor(e){ return {'Novo':'#5b6b7b','Em análise':'#1f5f8b','A aguardar informação':'#b26a00','Aprovado':'#2e7d5b','Indeferido':'#b3261e','Cancelado':'#94a3b8'}[e]||'#5b6b7b'; }
+function downloadBlob(blob,name){ const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},800); }
+function loadScript(src){ return new Promise((res,rej)=>{ if([...document.scripts].some(s=>s.src===src)) return res();
+  const s=document.createElement('script'); s.src=src; s.onload=()=>res(); s.onerror=()=>rej(new Error('Não foi possível carregar a biblioteca de Excel (precisa de ligação à internet).')); document.head.appendChild(s); }); }
+
+/* ---- Gráficos SVG ---- */
+function svgBars(title, items){
+  const W=360, rowH=24, padTop=32, padBottom=8, left=118, right=40;
+  const H=padTop+items.length*rowH+padBottom;
+  const max=Math.max(1,...items.map(i=>i.value)); const barW=W-left-right;
+  let b='';
+  items.forEach((it,idx)=>{ const y=padTop+idx*rowH; const w=Math.max(2,barW*it.value/max); const col=it.color||PAL[idx%PAL.length];
+    b+=`<text x="${left-8}" y="${y+14}" text-anchor="end" font-size="11" fill="#333">${esc(clip(it.label,17))}</text>`;
+    b+=`<rect x="${left}" y="${y+3}" width="${w.toFixed(1)}" height="15" rx="3" fill="${col}"/>`;
+    b+=`<text x="${left+w+5}" y="${y+15}" font-size="11" font-weight="600" fill="#333">${it.value}</text>`; });
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="max-width:100%;height:auto;display:block" font-family="-apple-system,Arial,sans-serif"><text x="0" y="15" font-size="13" font-weight="700" fill="#15486b">${esc(title)}</text>${b}</svg>`;
+  return {svg,w:W,h:H};
+}
+function svgDonut(title, items){
+  const total=items.reduce((a,i)=>a+i.value,0)||1; const cx=66,cy=92,r=48,rin=27; let ang=-Math.PI/2, arcs='';
+  items.forEach((it,idx)=>{ const frac=it.value/total; const a2=ang+frac*2*Math.PI; const col=it.color||PAL[idx%PAL.length];
+    if(it.value>0){ if(frac>=0.999){ arcs+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${col}"/>`; }
+      else { const x1=cx+r*Math.cos(ang),y1=cy+r*Math.sin(ang),x2=cx+r*Math.cos(a2),y2=cy+r*Math.sin(a2); const large=frac>0.5?1:0;
+      arcs+=`<path d="M ${cx} ${cy} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z" fill="${col}"/>`; } }
+    ang=a2; });
+  arcs+=`<circle cx="${cx}" cy="${cy}" r="${rin}" fill="#fff"/><text x="${cx}" y="${cy+5}" text-anchor="middle" font-size="16" font-weight="700" fill="#15486b">${total}</text>`;
+  let leg=''; items.forEach((it,idx)=>{ const ly=40+idx*18; const col=it.color||PAL[idx%PAL.length];
+    leg+=`<rect x="140" y="${ly-9}" width="10" height="10" rx="2" fill="${col}"/><text x="156" y="${ly}" font-size="11" fill="#333">${esc(clip(it.label,17))} (${it.value})</text>`; });
+  const H=Math.max(160,40+items.length*18+14);
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="360" height="${H}" viewBox="0 0 360 ${H}" style="max-width:100%;height:auto;display:block" font-family="-apple-system,Arial,sans-serif"><text x="0" y="15" font-size="13" font-weight="700" fill="#15486b">${esc(title)}</text>${arcs}${leg}</svg>`;
+  return {svg,w:360,h:H};
+}
+function barItems(o){ return Object.keys(o).map((k,i)=>({label:k,value:o[k],color:PAL[i%PAL.length]})); }
+
+/* ---- Período ---- */
+function relPeriodo(){
+  if(relModo==='semana') return {de:relSemana.ini, ate:relSemana.fim, label:'Semana de '+fmtData(relSemana.ini)+' a '+fmtData(relSemana.fim)};
+  if(relModo==='intervalo') return {de:relDe, ate:relAte, label:'De '+fmtData(relDe)+' a '+fmtData(relAte)};
+  const [y,m]=relMes.split('-').map(Number); const last=new Date(y,m,0).getDate();
+  const nome=new Date(y,m-1,1).toLocaleDateString('pt-PT',{month:'long',year:'numeric'});
+  return {de:relMes+'-01', ate:relMes+'-'+String(last).padStart(2,'0'), label:nome.charAt(0).toUpperCase()+nome.slice(1)};
+}
+async function fetchPeriodo(){
+  const per=relPeriodo();
+  let servs=await sbGet('servicos?select=*&data=gte.'+per.de+'&data=lte.'+per.ate+'&order=data');
+  if(relArea){ servs=servs.filter(s=>s.area_id===relArea); }
+  const ids=servs.map(s=>s.id);
+  const sv=await fetchSV(ids); const sm=await fetchSM(ids);
+  return {per,servs,sv,sm,svBy:groupBy(sv,'servico_id'),smBy:groupBy(sm,'servico_id')};
+}
+
+/* ---- Modelos por tipo de relatório ---- */
+function computeGeral(d){
+  const servs=d.servs;
+  const porEstado={}; EST_SERV.forEach(e=>porEstado[e]=0); servs.forEach(s=>porEstado[s.estado]=(porEstado[s.estado]||0)+1);
+  const porArea={}; servs.forEach(s=>{const k=areaNome(s.area_id)||'—';porArea[k]=(porArea[k]||0)+1;});
+  const porTipo={}; servs.forEach(s=>{const k=tipoNome(s.tipo_servico_id)||'—';porTipo[k]=(porTipo[k]||0)+1;});
+  const porMot={}; d.sm.forEach(x=>{if(x.motorista_id){const k=motNome(x.motorista_id);porMot[k]=(porMot[k]||0)+1;}});
+  const comp=servs.filter(s=>s.complementar);
+  const horas=d.sm.filter(x=>{const s=servs.find(y=>y.id===x.servico_id);return s&&s.complementar;}).reduce((a,x)=>a+(Number(x.num_horas)||0),0);
+  const pass=servs.reduce((a,s)=>a+(Number(s.num_passageiros)||0),0);
+  const ents=new Set(servs.map(s=>s.entidade_id).filter(Boolean)).size;
+  const kpis=[
+    {l:'Fichas',v:servs.length,c:'#15486b'},{l:'Validadas',v:porEstado['Validado']||0,c:'#2e7d5b'},
+    {l:'Realizadas',v:porEstado['Realizado']||0,c:'#0f766e'},{l:'Complementares',v:comp.length,c:'#6b3fa0'},
+    {l:'Passageiros',v:pass,c:'#b26a00'},{l:'Entidades servidas',v:ents,c:'#5b6b7b'},
+    {l:'Horas compl.',v:Math.round(horas*100)/100,c:'#9333ea'},{l:'Indeferidas',v:porEstado['Indeferido']||0,c:'#b3261e'}];
+  const charts=[];
+  const est=EST_SERV.map(e=>({label:e,value:porEstado[e]||0,color:estServColor(e)})).filter(i=>i.value>0);
+  if(est.length) charts.push(svgDonut('Fichas por estado',est));
+  if(Object.keys(porArea).length) charts.push(svgBars('Serviços por área',barItems(porArea)));
+  if(Object.keys(porTipo).length) charts.push(svgBars('Serviços por tipo',barItems(porTipo)));
+  if(Object.keys(porMot).length) charts.push(svgBars('Serviços por motorista',barItems(porMot)));
+  const rows=servs.map(s=>[s.numero||'',fmtData(s.data),areaNome(s.area_id),entNome(s.entidade_id),tipoNome(s.tipo_servico_id)||'',s.estado,s.num_passageiros??'',s.complementar?'Sim':'Não']);
+  return {title:'Relatório de Transportes',kpis,charts,listTitle:'Fichas',headers:['Nº','Data','Área','Entidade','Tipo','Estado','Pass.','Compl.'],rows,excelName:'relatorio_transportes'};
+}
+function estServColor(e){ return {'Em preparação':'#5b6b7b','Em análise':'#1f5f8b','A aguardar informação':'#b26a00','Validado':'#2e7d5b','Realizado':'#0f766e','Indeferido':'#b3261e','Cancelado':'#94a3b8'}[e]||'#5b6b7b'; }
+function diaTipo(dataISO){ const dow=new Date((dataISO||'')+'T00:00:00').getDay(); return dow===0?'dom':(dow===6?'sab':'sem'); }
+function computeMotoristas(d){
+  const servById={}; d.servs.forEach(s=>servById[s.id]=s);
+  const map={};
+  d.sm.forEach(x=>{ const s=servById[x.servico_id]; if(!s) return; const id=x.motorista_id||'—';
+    const a=map[id]||(map[id]={serv:new Set(),c:new Set(),hSem:0,hSab:0,hDom:0,banco:0});
+    a.serv.add(x.servico_id);
+    if(s.complementar){ a.c.add(x.servico_id); const h=Number(x.num_horas)||0;
+      const t=diaTipo(s.data); if(t==='dom') a.hDom+=h; else if(t==='sab') a.hSab+=h; else a.hSem+=h;
+      if(x.compl_tipo==='banco') a.banco+=h; }
+  });
+  const ids=Object.keys(map).sort((x,y)=>map[y].serv.size-map[x].serv.size); const nome=id=>id==='—'?'(sem motorista)':motNome(id);
+  const soma=k=>Math.round(ids.reduce((t,i)=>t+map[i][k],0)*100)/100;
+  const kpis=[
+    {l:'Serviços',v:new Set(d.sm.map(x=>x.servico_id)).size,c:'#1f5f8b'},
+    {l:'Motoristas',v:ids.filter(i=>i!=='—').length,c:'#15486b'},
+    {l:'Horas compl.',v:Math.round((soma('hSem')+soma('hSab')+soma('hDom'))*100)/100,c:'#b26a00'},
+    {l:'Banco de horas',v:soma('banco'),c:'#6b3fa0'}];
+  const charts=[];
+  const it=ids.map((i,k)=>({label:nome(i),value:map[i].serv.size,color:PAL[k%PAL.length]})); if(it.length) charts.push(svgBars('Serviços por motorista',it));
+  const itb=ids.filter(i=>map[i].banco>0).map((i,k)=>({label:nome(i),value:Math.round(map[i].banco*10)/10,color:PAL[k%PAL.length]})); if(itb.length) charts.push(svgBars('Banco de horas por motorista',itb));
+  const rows=ids.map(i=>[nome(i),map[i].serv.size,map[i].c.size,Math.round(map[i].hSem*100)/100,Math.round(map[i].hSab*100)/100,Math.round(map[i].hDom*100)/100,Math.round(map[i].banco*100)/100]);
+  return {title:'Relatório de Motoristas',kpis,charts,listTitle:'Motoristas',headers:['Motorista','Serviços','Compl.','H. semana','H. sábado','H. domingo','Banco h'],rows,excelName:'relatorio_motoristas'};
+}
+function computeMotoristaInd(d){
+  const mid=relMotId; const nm=mid?motNome(mid):'';
+  if(!mid) return {title:'Relatório de Motorista',kpis:[],charts:[],listTitle:'Serviços',headers:['Data','Entidade','Compl.','Horas','Dia','Tipo'],rows:[],excelName:'relatorio_motorista'};
+  const servById={}; d.servs.forEach(s=>servById[s.id]=s);
+  const legs=d.sm.filter(x=>x.motorista_id===mid).map(x=>({x,s:servById[x.servico_id]})).filter(o=>o.s).sort((a,b)=>(a.s.data||'').localeCompare(b.s.data||''));
+  let hSem=0,hSab=0,hDom=0,banco=0; const comp=new Set(), serv=new Set(); const rows=[];
+  legs.forEach(({x,s})=>{ serv.add(s.id); const h=Number(x.num_horas)||0; let diaLbl='';
+    if(s.complementar){ comp.add(s.id); const t=diaTipo(s.data);
+      if(t==='dom'){hDom+=h;diaLbl='Domingo';} else if(t==='sab'){hSab+=h;diaLbl='Sábado';} else {hSem+=h;diaLbl='Semana';}
+      if(x.compl_tipo==='banco') banco+=h; }
+    rows.push([fmtData(s.data),entNome(s.entidade_id),s.complementar?'Sim':'Não',h||'',diaLbl,s.complementar?(x.compl_tipo==='banco'?'Banco':'Receber'):'']); });
+  const kpis=[
+    {l:'Serviços',v:serv.size,c:'#1f5f8b'},{l:'Complementares',v:comp.size,c:'#6b3fa0'},
+    {l:'H. semana',v:Math.round(hSem*100)/100,c:'#b26a00'},{l:'H. sábado',v:Math.round(hSab*100)/100,c:'#0f766e'},
+    {l:'H. domingo',v:Math.round(hDom*100)/100,c:'#15486b'},{l:'Banco de horas',v:Math.round(banco*100)/100,c:'#b3261e'}];
+  const dias=[{label:'Semana',value:Math.round(hSem*10)/10,color:'#b26a00'},{label:'Sábado',value:Math.round(hSab*10)/10,color:'#0f766e'},{label:'Domingo',value:Math.round(hDom*10)/10,color:'#15486b'}].filter(i=>i.value>0);
+  const charts=[]; if(dias.length) charts.push(svgBars('Horas complementares por tipo de dia',dias));
+  return {title:'Motorista — '+nm,kpis,charts,listTitle:'Serviços de '+nm,headers:['Data','Entidade','Compl.','Horas','Dia','Tipo'],rows,excelName:'relatorio_motorista_'+nm.replace(/\s+/g,'_')};
+}
+function computeViaturas(d){
+  const servById={}; d.servs.forEach(s=>servById[s.id]=s);
+  const map={};
+  d.sv.forEach(x=>{ const s=servById[x.servico_id]; if(!s) return; const id=x.viatura_id||'—';
+    const a=map[id]||(map[id]={serv:new Set(),km:0,p:0,ck:0,dias:new Set()});
+    if(!a.serv.has(x.servico_id)){ a.km+=Number(s.distancia_km)||0; a.p+=Number(s.num_passageiros)||0; if(s.data)a.dias.add(s.data); }
+    a.serv.add(x.servico_id); a.ck+=Number(x.custo_km)||0;
+  });
+  const ids=Object.keys(map).sort((x,y)=>map[y].serv.size-map[x].serv.size); const nome=id=>id==='—'?'(sem viatura)':viatLabel(id);
+  const kmTot=ids.reduce((t,i)=>t+map[i].km,0);
+  const kpis=[
+    {l:'Viaturas usadas',v:ids.filter(i=>i!=='—').length,c:'#15486b'},{l:'Serviços',v:new Set(d.sv.map(x=>x.servico_id)).size,c:'#1f5f8b'},
+    {l:'Km totais',v:Math.round(kmTot*10)/10,c:'#0f766e'},{l:'Passageiros',v:ids.reduce((t,i)=>t+map[i].p,0),c:'#b26a00'}];
+  const charts=[];
+  const it=ids.map((i,k)=>({label:nome(i),value:map[i].serv.size,color:PAL[k%PAL.length]})); if(it.length) charts.push(svgBars('Serviços por viatura',it));
+  const itk=ids.filter(i=>map[i].km>0).map((i,k)=>({label:nome(i),value:Math.round(map[i].km),color:PAL[k%PAL.length]})); if(itk.length) charts.push(svgBars('Km por viatura',itk));
+  const rows=ids.map(i=>[nome(i),map[i].serv.size,Math.round(map[i].km*10)/10,map[i].dias.size,map[i].p,map[i].ck?fmtEur(map[i].ck):'—']);
+  return {title:'Relatório de Viaturas',kpis,charts,listTitle:'Viaturas',headers:['Viatura','Serviços','Km total','Dias em serviço','Passageiros','Custo do serviço (km)'],rows,excelName:'relatorio_viaturas'};
+}
+function computeEntidades(d){
+  const map={}; const get=(id,area)=>map[id]||(map[id]={srv:0,pass:0,valor:0,area:area});
+  d.servs.forEach(s=>{ const a=get(s.entidade_id||'—',s.area_id); a.srv++; a.pass+=Number(s.num_passageiros)||0;
+    const ck=(d.svBy[s.id]||[]).reduce((t,x)=>t+(Number(x.custo_km)||0),0);
+    const cm=(d.smBy[s.id]||[]).reduce((t,x)=>t+(Number(x.custo_motorista)||0),0);
+    a.valor+=ck+cm; if(a.area==null)a.area=s.area_id; });
+  const ids=Object.keys(map).sort((x,y)=>map[y].srv-map[x].srv); const nome=id=>id==='—'?'(sem entidade)':entNome(id);
+  const valTot=ids.reduce((t,i)=>t+map[i].valor,0);
+  const kpis=[
+    {l:'Entidades',v:ids.filter(i=>i!=='—').length,c:'#15486b'},{l:'Serviços',v:ids.reduce((t,i)=>t+map[i].srv,0),c:'#1f5f8b'},
+    {l:'Passageiros',v:ids.reduce((t,i)=>t+map[i].pass,0),c:'#0f766e'},{l:'Valor apoiado',v:fmtEur(valTot),c:'#b3261e'}];
+  const charts=[];
+  const its=ids.filter(i=>map[i].srv>0).slice(0,8).map((i,k)=>({label:nome(i),value:map[i].srv,color:PAL[k%PAL.length]})); if(its.length) charts.push(svgBars('Serviços por entidade',its));
+  const itv=ids.filter(i=>map[i].valor>0).sort((x,y)=>map[y].valor-map[x].valor).slice(0,8).map((i,k)=>({label:nome(i),value:Math.round(map[i].valor),color:PAL[k%PAL.length]})); if(itv.length) charts.push(svgBars('Valor apoiado por entidade (€)',itv));
+  const rows=ids.map(i=>[nome(i),areaNome(map[i].area),map[i].srv,map[i].pass,map[i].valor?fmtEur(map[i].valor):'—']);
+  return {title:'Relatório de Entidades',kpis,charts,listTitle:'Entidades',headers:['Entidade','Área','Serviços','Passageiros','Valor apoiado'],rows,excelName:'relatorio_entidades'};
+}
+async function computeModel(){
+  const d=await fetchPeriodo(); const base={de:d.per.de,ate:d.per.ate,label:d.per.label};
+  let m; if(relTipoRel==='motoristas') m=computeMotoristas(d);
+  else if(relTipoRel==='motorista') m=computeMotoristaInd(d);
+  else if(relTipoRel==='viaturas') m=computeViaturas(d);
+  else if(relTipoRel==='entidades') m=computeEntidades(d);
+  else m=computeGeral(d);
+  return {...base,...m};
+}
+
+/* ---- Ecrã ---- */
+function kpisGridScreen(kpis){ const c=k=>`<div style="background:${k.c};border-radius:10px;padding:9px 11px"><div style="font-size:20px;font-weight:700;color:#fff;line-height:1">${k.v}</div><div style="font-size:11.5px;color:#eaf1f6;margin-top:3px">${k.l}</div></div>`;
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px">${kpis.map(c).join('')}</div>`; }
+function relScreenHTML(m){
+  const charts=m.charts.map(c=>`<div class="item" style="padding:10px">${c.svg}</div>`).join('')||'<div class="empty">Sem dados para gráficos.</div>';
+  const rows=m.rows.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('');
+  return `
+    <div class="dash-group"><h3>INDICADORES · ${esc(m.label).toUpperCase()}</h3>${kpisGridScreen(m.kpis)}</div>
+    <div class="dash-group"><h3>GRÁFICOS</h3><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">${charts}</div></div>
+    <div class="dash-group"><h3>${esc(m.listTitle).toUpperCase()}</h3>
+      <div class="rel-count">${m.rows.length} registo(s)</div>
+      ${m.rows.length?`<div class="rel-scroll"><table class="rel-tab"><thead><tr>${m.headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="empty">Sem dados no período.</div>'}
+    </div>`;
+}
+
+/* ---- PDF ---- */
+const REL_PRINT_CSS=`
+*{box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#111;margin:0;padding:16px;font-size:12.5px}
+.rep-page+.rep-page{page-break-before:always}
+.rep-head{border-bottom:3px solid #15486b;padding-bottom:8px;margin-bottom:14px}
+.rep-org{font-size:12px;color:#444}
+.rep-title{font-size:22px;font-weight:800;color:#15486b}
+.rep-sub{font-size:14px;color:#333;margin-top:2px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}
+.kpi{color:#fff;border-radius:8px;padding:9px 11px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.kpi .kn{font-size:19px;font-weight:800;line-height:1}
+.kpi .kl{font-size:10.5px;margin-top:3px;opacity:.95}
+.rep-charts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.rep-chart{border:1px solid #ddd;border-radius:8px;padding:8px}
+.rep-chart svg{width:100%;height:auto;display:block}
+.rep-title2{font-size:16px;font-weight:700;color:#15486b;margin-bottom:8px}
+.rep-tab{width:100%;border-collapse:collapse;font-size:11.5px}
+.rep-tab th{background:#15486b;color:#fff;text-align:left;padding:6px 8px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.rep-tab td{padding:5px 8px;border-bottom:1px solid #e2e8f0}
+@page{margin:12mm}
+`;
+function relPrintHTML(m){
+  const kpi=k=>`<div class="kpi" style="background:${k.c}"><div class="kn">${k.v}</div><div class="kl">${k.l}</div></div>`;
+  const charts=m.charts.map(c=>`<div class="rep-chart">${c.svg}</div>`).join('');
+  const page1=`<div class="rep-page">
+    <div class="rep-head"><div class="rep-org">Município de Cabeceiras de Basto · Divisão de Desenvolvimento Social</div>
+      <div class="rep-title">${esc(m.title)}</div><div class="rep-sub">${esc(m.label)}</div></div>
+    <div class="kpis">${m.kpis.map(kpi).join('')}</div>
+    <div class="rep-charts">${charts}</div></div>`;
+  const rows=m.rows.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('');
+  const page2=`<div class="rep-page"><div class="rep-title2">${esc(m.listTitle)} — ${esc(m.label)}</div>
+    <table class="rep-tab"><thead><tr>${m.headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead>
+    <tbody>${rows||('<tr><td colspan="'+m.headers.length+'">Sem dados no período.</td></tr>')}</tbody></table></div>`;
+  return page1+page2;
+}
+function exportRelPDF(){ if(!relResult){ toast('Sem dados',true); return; } imprimirDoc(relPrintHTML(relResult), REL_PRINT_CSS); }
+
+/* ---- Excel ---- */
+function svgToPng(svg,w,h){ return new Promise((res,rej)=>{ const img=new Image();
+  img.onload=()=>{ try{ const c=document.createElement('canvas'); c.width=w; c.height=h; const ctx=c.getContext('2d');
+    ctx.fillStyle='#fff'; ctx.fillRect(0,0,w,h); ctx.drawImage(img,0,0,w,h); res(c.toDataURL('image/png').split(',')[1]); }catch(e){ rej(e); } };
+  img.onerror=()=>rej(new Error('svg->png')); img.src='data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(svg))); }); }
+async function exportRelExcel(){
+  if(!relResult){ toast('Sem dados',true); return; } const m=relResult; toast('A preparar Excel…');
+  try{
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js');
+    const wb=new ExcelJS.Workbook();
+    const ws=wb.addWorksheet('Dados'); ws.getColumn(1).width=30; ws.getColumn(2).width=16;
+    ws.mergeCells('A1:B1'); ws.getCell('A1').value=m.title; ws.getCell('A1').font={bold:true,size:14,color:{argb:'FF15486B'}};
+    ws.getCell('A2').value=m.label; ws.getCell('A2').font={italic:true,color:{argb:'FF555555'}};
+    let r=4; ws.getCell('A'+r).value='Indicadores'; ws.getCell('A'+r).font={bold:true}; r++;
+    m.kpis.forEach(k=>{ const a=ws.getCell('A'+r), b=ws.getCell('B'+r); a.value=k.l; b.value=k.v;
+      const argb='FF'+String(k.c).replace('#','').toUpperCase();
+      [a,b].forEach(cell=>{ cell.fill={type:'pattern',pattern:'solid',fgColor:{argb}}; cell.font={color:{argb:'FFFFFFFF'},bold:true}; }); r++; });
+    try{ let row=3; for(const c of m.charts){ const b64=await svgToPng(c.svg,c.w,c.h); const id=wb.addImage({base64:b64,extension:'png'}); ws.addImage(id,{tl:{col:3,row:row},ext:{width:c.w,height:c.h}}); row+=Math.ceil(c.h/20)+2; } }catch(e){ console.warn('img',e); }
+    const wl=wb.addWorksheet(m.listTitle.slice(0,28));
+    wl.addRow(m.headers); wl.getRow(1).font={bold:true,color:{argb:'FFFFFFFF'}}; wl.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF15486B'}};
+    m.rows.forEach(rw=>wl.addRow(rw)); wl.columns.forEach(col=>{ col.width=18; });
+    const buf=await wb.xlsx.writeBuffer();
+    downloadBlob(new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),(m.excelName||'relatorio')+'_'+m.de+'_a_'+m.ate+'.xlsx');
+    toast('Excel exportado');
+  }catch(e){ toast('Excel: '+e.message,true); }
+}
+
+/* ---- Vista ---- */
+async function viewRelatorios(){
+  if(!relMes){ const d=new Date(); relMes=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+  if(!relSemana) relSemana=weekRange();
+  if(!relDe){ relDe=relMes+'-01'; relAte=todayISO(); }
+  const selTipo=[['geral','Geral'],['motoristas','Motoristas'],['motorista','Motorista (individual)'],['viaturas','Viaturas'],['entidades','Entidades']].map(([v,l])=>`<option value="${v}" ${v===relTipoRel?'selected':''}>${l}</option>`).join('');
+  const selModo=[['mes','Mês'],['semana','Semana'],['intervalo','Entre datas']].map(([v,l])=>`<option value="${v}" ${v===relModo?'selected':''}>${l}</option>`).join('');
+  $('#view').innerHTML=`
+    <div class="view-head"><h2>Relatórios</h2></div>
+    <div class="toolbar">
+      <select id="rtipoRel" style="flex:1">${selTipo}</select>
+      <select id="rmodo" style="flex:1">${selModo}</select>
+    </div>
+    <div class="toolbar" id="rmotwrap" style="display:${relTipoRel==='motorista'?'flex':'none'}">
+      <select id="rmot" style="flex:1">${opts(cache.motoristas,relMotId,'id',m=>m.nome,'— escolher motorista —')}</select>
+    </div>
+    <div class="toolbar">
+      <span id="rpick" style="flex:2;display:flex;gap:8px"></span>
+      <select id="rarea" style="flex:1">${opts(cache.areas,relArea,'id',a=>a.nome,'Todas as áreas')}</select>
+    </div>
+    <div class="toolbar">
+      <button class="btn btn-ghost btn-sm" id="rpdf">Exportar PDF</button>
+      <button class="btn btn-ghost btn-sm" id="rxls">Exportar Excel</button>
+    </div>
+    <div id="relOut"></div>`;
+  renderRelPicker();
+  $('#rtipoRel').onchange=e=>{ relTipoRel=e.target.value; $('#rmotwrap').style.display=relTipoRel==='motorista'?'flex':'none'; renderRel(); };
+  $('#rmot').onchange=e=>{ relMotId=e.target.value; renderRel(); };
+  $('#rmodo').onchange=e=>{ relModo=e.target.value; renderRelPicker(); renderRel(); };
+  $('#rarea').onchange=e=>{ relArea=e.target.value; renderRel(); };
+  $('#rpdf').onclick=exportRelPDF;
+  $('#rxls').onclick=exportRelExcel;
+  renderRel();
+}
+function renderRelPicker(){
+  const el=$('#rpick');
+  if(relModo==='mes'){ el.innerHTML=`<input type="month" id="rmes" value="${relMes}" style="flex:1">`; $('#rmes').onchange=e=>{ relMes=e.target.value; renderRel(); }; }
+  else if(relModo==='intervalo'){ el.innerHTML=`<input type="date" id="rd1" value="${relDe}" style="flex:1"><input type="date" id="rd2" value="${relAte}" style="flex:1">`;
+    $('#rd1').onchange=e=>{ relDe=e.target.value; renderRel(); }; $('#rd2').onchange=e=>{ relAte=e.target.value; renderRel(); }; }
+  else { el.innerHTML=`<button class="btn btn-ghost btn-sm" id="rwp">◀</button><input type="date" id="rwd" value="${relSemana.ini}" style="flex:1"><button class="btn btn-ghost btn-sm" id="rwn">▶</button>`;
+    $('#rwp').onclick=()=>{ relSemana=shiftWeek(relSemana.ini,-7); $('#rwd').value=relSemana.ini; renderRel(); };
+    $('#rwn').onclick=()=>{ relSemana=shiftWeek(relSemana.ini,7); $('#rwd').value=relSemana.ini; renderRel(); };
+    $('#rwd').onchange=e=>{ relSemana=weekOf(e.target.value); renderRel(); }; }
+}
+async function renderRel(){
+  const out=$('#relOut'); out.innerHTML='<div class="loading">A calcular…</div>';
+  try{ relResult=await computeModel(); out.innerHTML=relScreenHTML(relResult); }
+  catch(e){ relResult=null; out.innerHTML=`<div class="empty">${esc(e.message)}</div>`; }
+}
+
+/* =========================================================
+   Arranque
+========================================================= */
+async function init(){
+  buildNav();
+  try{ await loadCaches(); render(); }
+  catch(e){
+    $('#banner').className='banner show';
+    $('#banner').textContent='Não foi possível ligar à base de dados. Verifica o URL/chave do Supabase. Detalhe: '+e.message;
+    $('#view').innerHTML='';
+  }
+}
+init();
+</script>
+</body>
+</html>
